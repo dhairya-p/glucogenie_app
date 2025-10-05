@@ -80,6 +80,3 @@ class GlucoGenieApp extends StatelessWidget {
   }
 }
 
-// https://yiailfcslucpainxdyqy.supabase.co
-// API Key
-// eyJhbGciOiJIUzI1NiIsInR5cCI6
