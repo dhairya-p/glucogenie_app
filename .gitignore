@@ -46,3 +46,85 @@ app.*.map.json
 
 # API keys and URL
 .env
+
+# ======================
+# 1. SECURITY (CRITICAL)
+# ======================
+.env
+.env.*
+*.pem
+*.key
+secring.gpg
+# Supabase local config containing secrets
+supabase/.temp/
+supabase/.branches/
+
+# ======================
+# 2. PYTHON / FASTAPI (Backend)
+# ======================
+__pycache__/
+*.py[cod]
+*$py.class
+# Virtual Environments
+venv/
+.venv/
+env/
+# Distribution / Builds
+build/
+dist/
+*.egg-info/
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ======================
+# 3. FLUTTER / DART (Mobile)
+# ======================
+.dart_tool/
+.packages
+.pub/
+.pub-cache/
+# Note: build/ is covered in Python section, but applies here too
+
+# --- Android Specifics ---
+**/android/local.properties
+**/android/.gradle
+**/android/app/build
+**/android/app/.cxx/
+**/android/*.iml
+
+# --- iOS Specifics (The messy parts) ---
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/app.flx
+**/ios/Flutter/app.zip
+**/ios/Flutter/flutter_assets/
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/ServiceDefinitions.json
+**/ios/Runner/GeneratedPluginRegistrant.*
+# CocoaPods
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Podfile.lock
+
+# --- MacOS Specifics ---
+**/macos/Flutter/ephemeral/
+**/macos/Pods/
+
+# ======================
+# 4. IDEs & EDITORS
+# ======================
+# Cursor / VS Code
+.vscode/
+# Note: Keep .cursor/rules, but ignore local user workspace data if it appears
+.cursor/state/
+*.code-workspace
+
+# IntelliJ / Android Studio
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Mac OS
+.DS_Store
