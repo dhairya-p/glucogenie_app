@@ -1,0 +1,138 @@
+---
+description: Global architectural rules for the Diabetes App (Flutter + FastAPI + Supabase)
+globs: ["**/*.dart", "**/*.py", "**/*.sql", "**/*.cypher"]
+alwaysApply: true
+---
+
+# 🩺 Singapore Diabetes App - Architectural Rules
+
+## 1. Core Technology Stack
+- **Frontend:** Flutter (Mobile).
+  - State Management: `flutter_riverpod` (v2.x).
+  - Networking: `dio` (Strictly no `http`).
+  - Navigation: `go_router`.
+- **Backend:** Python (FastAPI).
+  - Runtime: Python 3.11+.
+  - validation: `pydantic` (v2.x).
+- **Database:** Supabase (PostgreSQL) for relational data.
+- **Graph Knowledge:** Neo4j (via `neo4j-driver`) for Medical GraphRAG.
+- **LLM Orchestration:** `langchain` and `langgraph`.
+
+## 2. Cross-Language Data Sync (CRITICAL)
+- **Source of Truth:** The Python Pydantic models in `backend_api/app/models/` are the master definition.
+- **Generation Rule:** When creating a data model (e.g., `PatientContext`), YOU must:
+  1. Define it in Python first (inheriting from `BaseModel`).
+  2. Immediately generate the corresponding Dart class in `flutter_app/lib/models/`.
+  3. The Dart class must implement `fromJson` and `toJson` that match the Pydantic schema exactly.
+
+## 3. Agent Architecture (Backend)
+The backend is split into specialized Agents. Do not put all logic in `main.py`.
+- **Router Agent:** Decides intent (Medical vs. Lifestyle vs. ChitChat).
+- **Lifestyle Analyst:** Uses `pandas` to analyze `logs_glucose`, `logs_activity`, and `logs_meals`.
+- **Cultural Dietitian:** Uses Vision API to analyze food images and maps them to Singaporean nutritional data.
+- **Clinical Safety:** Checks queries against `medications` and `conditions` before replying.
+
+## 4. API & Security Standards
+- **Authentication:** The Frontend sends a Supabase JWT in the `Authorization` header.
+- **Backend Auth:** FastAPI dependencies must verify this JWT before processing requests.
+- **Secrets:** NEVER output API keys in code. Use `os.getenv("SUPABASE_KEY")` in Python and `Env.supabaseKey` in Dart.
+
+## 5. Coding Style
+- **Python:** Type-hint EVERYTHING (`def func(x: int) -> str:`). Use docstrings for complex Agent logic.
+- **Dart:** Use `final` variables by default. specific types over `var`.
+
+## 6. Context Injection
+- When the Analyst Agent runs, it MUST receive the `PatientContext` (Age, Ethnicity, Conditions) as an input argument. Never run analysis in a vacuum.
+
+
+
+
+
+---
+description: Specific coding standards for the FastAPI Backend (Python)
+globs: ["backend_api/**/*.py"]
+alwaysApply: false
+---
+
+# 🐍 Python & FastAPI Rules
+
+## 1. Pydantic v2 Standards
+- **Config:** Use `model_config = ConfigDict(...)` instead of `class Config:`.
+- **Serialization:** Use `model.model_dump()` instead of `.dict()`.
+- **Validation:** Use `@field_validator` instead of `@validator`.
+
+## 2. Agent Architecture
+- **Isolation:** Each Agent must have its own file in `app/agents/` (e.g., `analyst_agent.py`).
+- **Input:** Agents must accept a typed `State` object (TypedDict or Pydantic).
+- **Output:** Agents must return structured JSON, never raw strings.
+- **Tools:** Use `@tool` decorator from `langchain_core.tools`.
+
+## 3. Database Interactions
+- **ORM:** Use `supabase-py` client directly for simple CRUD.
+- **Graph:** Use `Neo4jGraph` methods for complex reasoning.
+- **Async:** All DB calls must be `await`ed. Do not use blocking calls in `async def` routes.
+
+## 4. Error Handling
+- Use `HTTPException` for API errors.
+- Wrap LLM calls in `try/except` blocks to handle timeouts or rate limits.
+- Log errors using `logger.error()`, not `print()`.
+
+## 5. Documentation
+- All routes must have `summary`, `description`, and `response_model`.
+- Complex logic in Agents must be commented with "Why", not just "How".
+
+
+
+---
+description: Specific coding standards for the Flutter Frontend (Dart)
+globs: ["flutter_app/**/*.dart"]
+alwaysApply: false
+---
+
+# 📱 Flutter & Dart Rules
+
+## 1. State Management (Riverpod 2.x)
+- **Providers:** Always use `@riverpod` code generation.
+  - *Bad:* `final myProvider = Provider(...)`
+  - *Good:* `@riverpod class MyNotifier extends _$MyNotifier ...`
+- **Consumption:** Use `ConsumerWidget` or `ConsumerStatefulWidget`.
+- **Async Data:** Always handle `AsyncValue` with `.when()`:
+  ```dart
+  ref.watch(provider).when(
+    data: (data) => ...,
+    loading: () => const CircularProgressIndicator(),
+    error: (e, st) => Text('Error: $e'),
+  );
+Side Effects: Use ref.listen for navigation/snackbars, not ref.watch.
+
+2. Networking & Data Layer
+Client: Use Dio for all HTTP requests.
+
+Serialization: Use json_serializable or freezed for all models.
+
+Type Safety: NEVER use dynamic. Define strict types for API responses.
+
+Repository Pattern:
+
+Services (API calls) -> Repositories (Data logic) -> Controllers (State) -> UI.
+
+3. UI/UX Standards
+Responsiveness: Use LayoutBuilder or MediaQuery sparingly; prefer flexible widgets (Expanded, Flexible).
+
+Text: Use Theme.of(context).textTheme styles. Do not hardcode TextStyle unless absolutely necessary.
+
+Images: Use CachedNetworkImage for all remote URLs.
+
+4. Project Structure
+lib/models/: Data classes (Generated from Pydantic).
+
+lib/providers/: Riverpod controllers.
+
+lib/screens/: Feature-specific pages.
+
+lib/widgets/: Reusable components (Buttons, Cards).
+
+5. Testing
+Use flutter_test and mocktail for unit tests.
+
+Mock Repositories, not Providers, when testing UI.

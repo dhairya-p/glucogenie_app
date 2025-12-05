@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:provider/provider.dart' as provider;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -23,7 +24,11 @@ void main() async {
     anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
 
-  runApp(const GlucoGenieApp());
+  runApp(
+    const ProviderScope(
+      child: GlucoGenieApp(),
+    ),
+  );
 }
 
 class GlucoGenieApp extends StatelessWidget {
@@ -31,10 +36,10 @@ class GlucoGenieApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MultiProvider(
+    return provider.MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthService()),
-        ChangeNotifierProvider(create: (_) => DatabaseService()),
+        provider.ChangeNotifierProvider(create: (_) => AuthService()),
+        provider.ChangeNotifierProvider(create: (_) => DatabaseService()),
       ],
       child: MaterialApp(
         title: 'GlucoGenie',

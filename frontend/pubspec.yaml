@@ -36,6 +36,10 @@ dependencies:
   
   # State Management
   provider: ^6.1.1
+  flutter_riverpod: ^2.5.1
+  
+  # Chat Streaming
+  flutter_client_sse: ^2.0.0
   
   # UI Components
   google_fonts: ^6.1.0

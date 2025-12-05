@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../../services/database_service.dart';
+import '../ai_chatbot_screen.dart';
 
 class DashboardTab extends StatelessWidget {
   const DashboardTab({Key? key}) : super(key: key);
@@ -14,16 +15,35 @@ class DashboardTab extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Consumer<DatabaseService>(
-              builder: (context, dbService, _) {
-                final profile = dbService.userProfile;
-                final firstName = profile?.firstName ?? 'there';
-                
-                return Text(
-                  'Hello, $firstName!',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                );
-              },
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Consumer<DatabaseService>(
+                  builder: (context, dbService, _) {
+                    final profile = dbService.userProfile;
+                    final firstName = profile?.firstName ?? 'there';
+
+                    return Text(
+                      'Hello, $firstName!',
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    );
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chat_bubble_outline),
+                  color: const Color(0xFF6366F1),
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const AiChatbotScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ],
             ),
             const SizedBox(height: 8),
             Text(

@@ -1,0 +1,30 @@
+# --- Core Web Framework ---
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9   # For image uploads
+
+# --- Data Validation & Settings ---
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+python-dotenv>=1.0.1      # For loading .env files
+
+# --- Database & Graph ---
+supabase>=2.4.0           # Official Supabase client
+neo4j>=5.19.0             # Neo4j Driver for GraphRAG
+
+# --- AI & Agents ---
+langchain>=0.1.16
+langchain-openai>=0.1.3
+langchain-community>=0.0.33
+langgraph>=0.0.38         # For orchestrating the multi-agent router
+
+# --- Data Science (For Analyst Agent) ---
+pandas>=2.2.0             # For analyzing glucose logs
+numpy>=1.26.0
+scipy>=1.13.0             # For correlation calculations
+matplotlib>=3.8.0         # (Optional) If we generate charts server-side
+
+# --- Utilities ---
+httpx>=0.27.0             # Async HTTP client
+tenacity>=8.2.3           # For retrying failed LLM calls
+PyJWT>=2.8.0              # For JWT token decoding (fallback auth)
