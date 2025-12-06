@@ -54,7 +54,12 @@ class _MedicationLogScreenState extends State<MedicationLogScreen> {
     }
 
     final userId = context.read<AuthService>().currentUser?.id;
-    if (userId == null) return;
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please sign in to log medication')),
+      );
+      return;
+    }
 
     final success = await context.read<DatabaseService>().addMedicationLog(
       userId: userId,
@@ -67,12 +72,19 @@ class _MedicationLogScreenState extends State<MedicationLogScreen> {
 
     if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Medication logged successfully')),
+        const SnackBar(
+          content: Text('Medication logged successfully'),
+          backgroundColor: Colors.green,
+        ),
       );
       Navigator.pop(context);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to log medication')),
+        const SnackBar(
+          content: Text('Failed to log medication. Please check your connection and try again.'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 4),
+        ),
       );
     }
   }
@@ -227,9 +239,20 @@ class _MedicationLogScreenState extends State<MedicationLogScreen> {
             ElevatedButton(
               onPressed: _saveMedication,
               style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple,
+                foregroundColor: Colors.white,
                 padding: const EdgeInsets.all(18),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
-              child: const Text('Save Medication Log', style: TextStyle(fontSize: 16)),
+              child: const Text(
+                'Save Medication Log',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ],
         ),

@@ -28,6 +28,7 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<DatabaseService>().fetchUserProfile();
       context.read<DatabaseService>().fetchGlucoseReadings();
+      context.read<DatabaseService>().fetchInsights();
     });
   }
 

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from pydantic.config import ConfigDict
 
 from app.schemas.patient_context import PatientContext
+from app.schemas.enhanced_patient_context import EnhancedPatientContext
 
 
 class FoodItem(BaseModel):
@@ -27,6 +28,7 @@ class CulturalDietitianState(BaseModel):
     patient: PatientContext
     image_url: Optional[str] = None
     image_path: Optional[str] = None
+    enhanced_context: Optional[EnhancedPatientContext] = None  # Full context with recent logs
 
     model_config = ConfigDict(extra="ignore")
 

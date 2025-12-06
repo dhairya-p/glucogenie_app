@@ -37,27 +37,61 @@ class _GlucoseLogScreenState extends State<GlucoseLogScreen> {
       return;
     }
 
-    final userId = context.read<AuthService>().currentUser?.id;
-    if (userId == null) return;
-
-    final glucoseReading = GlucoseReading(
-      userId: userId,
-      reading: reading,
-      timing: _timing,
-    );
-
-    final success = await context.read<DatabaseService>().addGlucoseReading(glucoseReading);
-
-    if (!mounted) return;
-
-    if (success) {
+    // Validate reading range (typical glucose range: 20-600 mg/dL)
+    if (reading < 20 || reading > 600) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Reading saved successfully')),
+        const SnackBar(
+          content: Text('Please enter a glucose reading between 20-600 mg/dL'),
+          backgroundColor: Colors.orange,
+        ),
       );
-      Navigator.pop(context);
-    } else {
+      return;
+    }
+
+    final userId = context.read<AuthService>().currentUser?.id;
+    if (userId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to save reading')),
+        const SnackBar(content: Text('Please sign in to log glucose readings')),
+      );
+      return;
+    }
+
+    try {
+      final glucoseReading = GlucoseReading(
+        userId: userId,
+        reading: reading,
+        timing: _timing,
+      );
+
+      final success = await context.read<DatabaseService>().addGlucoseReading(glucoseReading);
+
+      if (!mounted) return;
+
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Reading saved successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.pop(context);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to save reading. Please check your connection and try again.'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 4),
+        ),
       );
     }
   }
@@ -124,31 +158,24 @@ class _GlucoseLogScreenState extends State<GlucoseLogScreen> {
                 );
               }).toList(),
             ),
-            const SizedBox(height: 24),
-            
-            const SizedBox(height: 32),
-            OutlinedButton.icon(
-              onPressed: () {
-                // TODO: Implement photo upload
-              },
-              icon: const Icon(Icons.camera_alt),
-              label: const Text('Upload Photo'),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.all(16),
-              ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: () {
-                // TODO: Implement voice mode
-              },
-              icon: const Icon(Icons.mic),
-              label: const Text('Use voice mode'),
-            ),
             const SizedBox(height: 32),
             ElevatedButton(
               onPressed: _saveReading,
-              child: const Text('Save Reading'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text(
+                'Save Reading',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ],
         ),

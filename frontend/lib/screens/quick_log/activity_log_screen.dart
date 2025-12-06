@@ -60,7 +60,12 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
     }
 
     final userId = context.read<AuthService>().currentUser?.id;
-    if (userId == null) return;
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please sign in to log activity')),
+      );
+      return;
+    }
 
     final success = await context.read<DatabaseService>().addActivityLog(
       userId: userId,
@@ -74,12 +79,19 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
 
     if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Activity logged successfully')),
+        const SnackBar(
+          content: Text('Activity logged successfully'),
+          backgroundColor: Colors.green,
+        ),
       );
       Navigator.pop(context);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to log activity')),
+        const SnackBar(
+          content: Text('Failed to log activity. Please check your connection and try again.'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 4),
+        ),
       );
     }
   }
@@ -200,9 +212,20 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
             ElevatedButton(
               onPressed: _saveActivity,
               style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple,
+                foregroundColor: Colors.white,
                 padding: const EdgeInsets.all(18),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
-              child: const Text('Save Activity', style: TextStyle(fontSize: 16)),
+              child: const Text(
+                'Save Activity',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ],
         ),

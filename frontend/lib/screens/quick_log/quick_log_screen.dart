@@ -3,6 +3,7 @@ import 'glucose_log_screen.dart';
 import 'weight_log_screen.dart';
 import 'medication_log_screen.dart';
 import 'activity_log_screen.dart';
+import 'meal_log_screen.dart';
 
 class QuickLogScreen extends StatelessWidget {
   const QuickLogScreen({Key? key}) : super(key: key);
@@ -22,12 +23,25 @@ class QuickLogScreen extends StatelessWidget {
           _buildLogCard(
             context,
             icon: Icons.water_drop,
-            title: 'Blood Glucose Level & Meals',
+            title: 'Blood Glucose Level',
             color: Colors.red,
             onTap: () {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const GlucoseLogScreen()),
+              );
+            },
+          ),
+          const SizedBox(height: 16),
+          _buildLogCard(
+            context,
+            icon: Icons.restaurant,
+            title: 'Meal',
+            color: Colors.orange,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const MealLogScreen()),
               );
             },
           ),

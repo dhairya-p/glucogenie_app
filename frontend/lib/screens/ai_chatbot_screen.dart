@@ -119,11 +119,13 @@ class _AiChatbotScreenState extends ConsumerState<AiChatbotScreen> {
                     },
                   ),
           ),
-          // Status indicator
-          if (chatState.isStreaming || chatState.status != null)
+          // Status indicator - only show errors, not regular status messages
+          if (chatState.isStreaming || (chatState.status != null && chatState.status!.startsWith('error')))
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: Colors.grey[100],
+              color: chatState.status != null && chatState.status!.startsWith('error')
+                  ? Colors.red[50]
+                  : Colors.grey[100],
               child: Row(
                 children: [
                   if (chatState.isStreaming) ...[
@@ -149,19 +151,29 @@ class _AiChatbotScreenState extends ConsumerState<AiChatbotScreen> {
                       ),
                     ),
                   ],
-                  if (chatState.status != null && !chatState.isStreaming)
+                  if (chatState.status != null && 
+                      chatState.status!.startsWith('error') && 
+                      !chatState.isStreaming)
                     Expanded(
-                      child: Text(
-                        chatState.status!.startsWith('error')
-                            ? 'Error occurred'
-                            : 'Status: ${chatState.status}',
-                        style: TextStyle(
-                          color: chatState.status!.startsWith('error')
-                              ? Colors.red[700]
-                              : Colors.grey[600],
-                          fontSize: 12,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.error_outline,
+                            size: 16,
+                            color: Colors.red[700],
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Error: ${chatState.status!.replaceFirst('error: ', '')}',
+                              style: TextStyle(
+                                color: Colors.red[700],
+                                fontSize: 12,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                 ],

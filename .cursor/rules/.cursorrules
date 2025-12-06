@@ -19,17 +19,41 @@ alwaysApply: true
 - **LLM Orchestration:** `langchain` and `langgraph`.
 
 ## 2. Cross-Language Data Sync (CRITICAL)
-- **Source of Truth:** The Python Pydantic models in `backend_api/app/models/` are the master definition.
+- **Source of Truth:** The Python Pydantic models in `backend/app/schemas/` are the master definition.
 - **Generation Rule:** When creating a data model (e.g., `PatientContext`), YOU must:
-  1. Define it in Python first (inheriting from `BaseModel`).
-  2. Immediately generate the corresponding Dart class in `flutter_app/lib/models/`.
+  1. Define it in Python first (inheriting from `BaseModel`) in `backend/app/schemas/`.
+  2. Immediately generate the corresponding Dart class in `frontend/lib/models/`.
   3. The Dart class must implement `fromJson` and `toJson` that match the Pydantic schema exactly.
 
 ## 3. Agent Architecture (Backend)
 The backend is split into specialized Agents. Do not put all logic in `main.py`.
-- **Router Agent:** Decides intent (Medical vs. Lifestyle vs. ChitChat).
-- **Lifestyle Analyst:** Uses `pandas` to analyze `logs_glucose`, `logs_activity`, and `logs_meals`.
-- **Cultural Dietitian:** Uses Vision API to analyze food images and maps them to Singaporean nutritional data.
+- **Router Agent:** Decides intent (Medical vs. Lifestyle vs. GraphRAG vs. ChitChat).
+- **Lifestyle Analyst:** Uses `pandas` to analyze:
+  - `glucose_readings` (reading, timing, notes, created_at)
+  - `activity_logs` (duration_minutes, intensity, created_at)
+  - `weight_logs` (weight, unit, created_at)
+  - `medication_logs` (medication_name, quantity, created_at)
+  - `meal_logs` (meal, description, created_at)
+  - `profiles` (first_name, last_name, age, sex, ethnicity, height, activity_level, location)
+  - `conditions` (condition_name)
+  - `medications` (medication_name)
+- **GraphRAG Agent:** Queries Neo4j medical knowledge graph for:
+  - Drug-drug interactions
+  - Drug-food interactions
+  - Evidence-based recommendations from guidelines
+  - Medical paper citations
+- **Cultural Dietitian:** Uses Vision API to analyze food images and maps them to Singaporean nutritional data, storing them to `meal_logs` table with schema:
+  ```sql
+  meal_logs (
+    id uuid not null default gen_random_uuid(),
+    user_id uuid not null,
+    meal text not null,
+    description text null,
+    created_at timestamp with time zone not null default timezone('utc'::text, now()),
+    constraint meal_logs__pkey primary key (id),
+    constraint meal_logs__user_id_fkey foreign KEY (user_id) references profiles (id) on delete CASCADE
+  )
+  ```
 - **Clinical Safety:** Checks queries against `medications` and `conditions` before replying.
 
 ## 4. API & Security Standards
@@ -42,7 +66,9 @@ The backend is split into specialized Agents. Do not put all logic in `main.py`.
 - **Dart:** Use `final` variables by default. specific types over `var`.
 
 ## 6. Context Injection
-- When the Analyst Agent runs, it MUST receive the `PatientContext` (Age, Ethnicity, Conditions) as an input argument. Never run analysis in a vacuum.
+- When any Agent runs, it MUST receive the `PatientContext` as an input argument. Never run analysis in a vacuum.
+- **PatientContext** includes: first_name, last_name, age, sex, ethnicity, height (cm), activity_level, location, conditions, medications.
+- All patient context is automatically included in the chatbot's system prompt for every interaction.
 
 
 
@@ -50,7 +76,7 @@ The backend is split into specialized Agents. Do not put all logic in `main.py`.
 
 ---
 description: Specific coding standards for the FastAPI Backend (Python)
-globs: ["backend_api/**/*.py"]
+globs: ["backend/**/*.py"]
 alwaysApply: false
 ---
 
@@ -69,8 +95,9 @@ alwaysApply: false
 
 ## 3. Database Interactions
 - **ORM:** Use `supabase-py` client directly for simple CRUD.
-- **Graph:** Use `Neo4jGraph` methods for complex reasoning.
+- **Graph:** Use `Neo4jClient` (from `app.core.neo4j_client`) for medical knowledge graph queries.
 - **Async:** All DB calls must be `await`ed. Do not use blocking calls in `async def` routes.
+- **Neo4j:** Use synchronous Neo4j driver (neo4j package) within agent functions. Neo4j operations are fast enough to not require async.
 
 ## 4. Error Handling
 - Use `HTTPException` for API errors.
@@ -85,7 +112,7 @@ alwaysApply: false
 
 ---
 description: Specific coding standards for the Flutter Frontend (Dart)
-globs: ["flutter_app/**/*.dart"]
+globs: ["frontend/**/*.dart"]
 alwaysApply: false
 ---
 
@@ -124,13 +151,11 @@ Text: Use Theme.of(context).textTheme styles. Do not hardcode TextStyle unless a
 Images: Use CachedNetworkImage for all remote URLs.
 
 4. Project Structure
-lib/models/: Data classes (Generated from Pydantic).
-
-lib/providers/: Riverpod controllers.
-
-lib/screens/: Feature-specific pages.
-
-lib/widgets/: Reusable components (Buttons, Cards).
+- `lib/models/`: Data classes (Generated from Pydantic schemas in `backend/app/schemas/`).
+- `lib/providers/`: Riverpod controllers (using `@riverpod` code generation).
+- `lib/screens/`: Feature-specific pages.
+- `lib/services/`: API clients and data services (e.g., `database_service.dart`, `chat_stream_service.dart`).
+- `lib/widgets/`: Reusable components (Buttons, Cards).
 
 5. Testing
 Use flutter_test and mocktail for unit tests.

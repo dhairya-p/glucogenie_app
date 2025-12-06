@@ -13,7 +13,6 @@ class WeightLogScreen extends StatefulWidget {
 class _WeightLogScreenState extends State<WeightLogScreen> {
   final _weightController = TextEditingController();
   final _notesController = TextEditingController();
-  String _unit = 'kg';
 
   @override
   void dispose() {
@@ -39,12 +38,17 @@ class _WeightLogScreenState extends State<WeightLogScreen> {
     }
 
     final userId = context.read<AuthService>().currentUser?.id;
-    if (userId == null) return;
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please sign in to log weight')),
+      );
+      return;
+    }
 
     final success = await context.read<DatabaseService>().addWeightLog(
       userId: userId,
       weight: weight,
-      unit: _unit,
+      unit: 'kg',
       notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
     );
 
@@ -52,12 +56,19 @@ class _WeightLogScreenState extends State<WeightLogScreen> {
 
     if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Weight logged successfully')),
+        const SnackBar(
+          content: Text('Weight logged successfully'),
+          backgroundColor: Colors.green,
+        ),
       );
       Navigator.pop(context);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to log weight')),
+        const SnackBar(
+          content: Text('Failed to log weight. Please check your connection and try again.'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 4),
+        ),
       );
     }
   }
@@ -85,7 +96,6 @@ class _WeightLogScreenState extends State<WeightLogScreen> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(
-                  flex: 2,
                   child: TextField(
                     controller: _weightController,
                     keyboardType: TextInputType.number,
@@ -96,22 +106,11 @@ class _WeightLogScreenState extends State<WeightLogScreen> {
                     ),
                   ),
                 ),
-                Expanded(
-                  child: DropdownButton<String>(
-                    value: _unit,
-                    isExpanded: true,
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: Text(
+                    'kg',
                     style: TextStyle(fontSize: 24, color: Colors.grey[800]),
-                    items: ['kg', 'lbs'].map((unit) {
-                      return DropdownMenuItem(
-                        value: unit,
-                        child: Text(unit),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => _unit = value);
-                      }
-                    },
                   ),
                 ),
               ],
@@ -161,9 +160,20 @@ class _WeightLogScreenState extends State<WeightLogScreen> {
             ElevatedButton(
               onPressed: _saveWeight,
               style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple,
+                foregroundColor: Colors.white,
                 padding: const EdgeInsets.all(18),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
-              child: const Text('Save Weight', style: TextStyle(fontSize: 16)),
+              child: const Text(
+                'Save Weight',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ],
         ),

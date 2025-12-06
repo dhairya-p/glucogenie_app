@@ -18,7 +18,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   String _sex = 'Male';
   String? _ethnicity;
   int _age = 50;
+  int? _height;
   String? _activityLevel;
+  final _heightController = TextEditingController();
   
   List<String> _selectedConditions = [];
   List<String> _selectedMedications = [];
@@ -68,6 +70,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         _sex = profile.sex ?? 'Male';
         _ethnicity = profile.ethnicity;
         _age = profile.age ?? 50;
+        _height = profile.height;
+        _heightController.text = profile.height?.toString() ?? '';
         _activityLevel = profile.activityLevel;
       });
     }
@@ -88,6 +92,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _firstNameController.dispose();
     _lastNameController.dispose();
     _locationController.dispose();
+    _heightController.dispose();
     super.dispose();
   }
 
@@ -101,6 +106,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     if (currentProfile == null) return;
 
     // Update profile
+    final heightValue = _heightController.text.trim().isEmpty 
+        ? null 
+        : int.tryParse(_heightController.text.trim());
+    
     final updatedProfile = currentProfile.copyWith(
       firstName: _firstNameController.text.trim(),
       lastName: _lastNameController.text.trim(),
@@ -110,6 +119,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       ethnicity: _ethnicity,
       sex: _sex,
       age: _age,
+      height: heightValue,
       activityLevel: _activityLevel,
     );
 
@@ -227,6 +237,23 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 divisions: 82,
                 label: _age.toString(),
                 onChanged: (value) => setState(() => _age = value.toInt()),
+              ),
+              
+              const SizedBox(height: 16),
+              Text('Height (cm)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _heightController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  hintText: '170',
+                  suffixText: 'cm',
+                  helperText: 'Height in centimeters',
+                ),
+                onChanged: (value) {
+                  final heightValue = int.tryParse(value);
+                  setState(() => _height = heightValue);
+                },
               ),
               
               const SizedBox(height: 16),

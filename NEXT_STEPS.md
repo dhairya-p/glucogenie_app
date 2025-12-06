@@ -317,11 +317,6 @@ def test_lifestyle_analyst():
 
 ## 📊 Data Model Enhancements
 
-### 1. **Add Missing Fields**
-- `profiles.height` (for BMI calculation)
-- `glucose_readings.device_type` (CGM vs manual)
-- `activity_logs.heart_rate` (if available from wearables)
-
 ### 2. **Create Views for Common Queries**
 ```sql
 -- Supabase SQL
@@ -355,10 +350,6 @@ GROUP BY user_id;
 - Queue data logs when offline
 - Sync when connection restored
 
-### 2. **Widgets & Quick Actions**
-- Home screen widget (iOS/Android)
-- Quick log glucose from notification
-- Voice input for logging
 
 ### 3. **Data Visualization**
 - Charts for glucose trends (use `fl_chart` package)

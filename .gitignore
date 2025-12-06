@@ -116,8 +116,10 @@ htmlcov/
 # ======================
 # Cursor / VS Code
 .vscode/
-# Note: Keep .cursor/rules, but ignore local user workspace data if it appears
+# Cursor: Keep .cursor/rules (committed)
 .cursor/state/
+.cursor/chat/
+.cursor/*.json
 *.code-workspace
 
 # IntelliJ / Android Studio
@@ -129,4 +131,5 @@ htmlcov/
 # Mac OS
 .DS_Store
 
-.cursor/
+
+*.md

@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:http/http.dart' as http;
 import '../models/user_profile.dart';
 import '../models/glucose_reading.dart';
 
@@ -8,9 +11,11 @@ class DatabaseService extends ChangeNotifier {
 
   UserProfile? _userProfile;
   List<GlucoseReading> _glucoseReadings = [];
+  List<Map<String, dynamic>> _insights = [];
 
   UserProfile? get userProfile => _userProfile;
   List<GlucoseReading> get glucoseReadings => _glucoseReadings;
+  List<Map<String, dynamic>> get insights => _insights;
 
   // Create or update complete profile
   Future<bool> createOrUpdateCompleteProfile({
@@ -19,6 +24,7 @@ class DatabaseService extends ChangeNotifier {
     required String lastName,
     required String sex,
     required int age,
+    int? height,
     String? ethnicity,
     String? location,
     String? activityLevel,
@@ -36,6 +42,9 @@ class DatabaseService extends ChangeNotifier {
         'updated_at': DateTime.now().toIso8601String(),
       };
 
+      if (height != null && height > 0) {
+        profileData['height'] = height;
+      }
       if (ethnicity != null && ethnicity.isNotEmpty) {
         profileData['ethnicity'] = ethnicity;
       }
@@ -182,8 +191,23 @@ class DatabaseService extends ChangeNotifier {
   // Add glucose reading
   Future<bool> addGlucoseReading(GlucoseReading reading) async {
     try {
-      await _supabase.from('glucose_readings').insert(reading.toJson());
+      // Validate reading
+      if (reading.reading <= 0 || reading.reading > 1000) {
+        return false;
+      }
+      
+      if (reading.userId.isEmpty) {
+        return false;
+      }
+      
+      // Prepare data for insert
+      final readingData = reading.toJson();
+      
+      await _supabase.from('glucose_readings').insert(readingData);
+      
+      // Refresh the readings list
       await fetchGlucoseReadings();
+      
       return true;
     } catch (e) {
       return false;
@@ -246,6 +270,35 @@ class DatabaseService extends ChangeNotifier {
         'duration_minutes': durationMinutes,
         'notes': notes,
       });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Add meal log
+  Future<bool> addMealLog({
+    required String userId,
+    required String meal,
+    String? description,
+  }) async {
+    try {
+      // Validate inputs
+      if (meal.trim().isEmpty) {
+        return false;
+      }
+      
+      // Prepare data - ensure description is null if empty
+      final mealData = <String, dynamic>{
+        'user_id': userId,
+        'meal': meal.trim(),
+      };
+      
+      if (description != null && description.trim().isNotEmpty) {
+        mealData['description'] = description.trim();
+      }
+      
+      await _supabase.from('meal_logs').insert(mealData);
       return true;
     } catch (e) {
       return false;
@@ -325,6 +378,54 @@ class DatabaseService extends ChangeNotifier {
       return true;
     } catch (e) {
       return false;
+    }
+  }
+
+  // Fetch insights from backend
+  Future<void> fetchInsights() async {
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) {
+        _insights = [];
+        notifyListeners();
+        return;
+      }
+
+      // Get access token
+      final session = _supabase.auth.currentSession;
+      if (session == null) {
+        _insights = [];
+        notifyListeners();
+        return;
+      }
+
+      // Call FastAPI backend directly
+      // Backend URL - same as chat endpoint
+      const baseUrl = 'http://localhost:8000';
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/insights'),
+        headers: {
+          'Authorization': 'Bearer ${session.accessToken}',
+          'Content-Type': 'application/json',
+        },
+      );
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final insightsData = data['insights'];
+        
+        if (insightsData != null && insightsData is List) {
+          _insights = List<Map<String, dynamic>>.from(insightsData);
+        } else {
+          _insights = [];
+        }
+      } else {
+        _insights = [];
+      }
+      notifyListeners();
+    } catch (e) {
+      _insights = [];
+      notifyListeners();
     }
   }
 }

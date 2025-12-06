@@ -4,8 +4,21 @@ import 'package:intl/intl.dart';
 import '../../services/database_service.dart';
 import '../ai_chatbot_screen.dart';
 
-class DashboardTab extends StatelessWidget {
+class DashboardTab extends StatefulWidget {
   const DashboardTab({Key? key}) : super(key: key);
+
+  @override
+  State<DashboardTab> createState() => _DashboardTabState();
+}
+
+class _DashboardTabState extends State<DashboardTab> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<DatabaseService>().fetchInsights();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -137,19 +150,48 @@ class DashboardTab extends StatelessWidget {
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            _buildInsightCard(
-              icon: Icons.check_circle,
-              iconColor: Colors.green,
-              title: 'Great glucose stability!',
-              subtitle: 'Your glucose has stayed within the target range for most of the day. Keep it up!',
-            ),
-            const SizedBox(height: 12),
-            _buildInsightCard(
-              icon: Icons.lightbulb,
-              iconColor: Colors.orange,
-              title: 'Suggested for you (AI-generated)',
-              subtitle: 'Stay active',
-              description: 'Short walks after meals can help stabilize your blood glucose levels.',
+            Consumer<DatabaseService>(
+              builder: (context, dbService, _) {
+                final insights = dbService.insights;
+                
+                if (insights.isEmpty) {
+                  return Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[200]!),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline, color: Colors.grey[600]),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Insufficient data for personalized insights. Keep logging your glucose, meals, and activities!',
+                            style: TextStyle(color: Colors.grey[600]),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+                
+                return Column(
+                  children: [
+                    for (var insight in insights)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _buildInsightCard(
+                          icon: _getInsightIcon(insight['title']?.toString() ?? ''),
+                          iconColor: _getInsightColor(insight['title']?.toString() ?? ''),
+                          title: insight['title']?.toString() ?? 'Insight',
+                          subtitle: insight['detail']?.toString() ?? '',
+                        ),
+                      ),
+                  ],
+                );
+              },
             ),
           ],
         ),
@@ -202,5 +244,37 @@ class DashboardTab extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  IconData _getInsightIcon(String title) {
+    final titleLower = title.toLowerCase();
+    if (titleLower.contains('risk') || titleLower.contains('alert')) {
+      return Icons.warning;
+    } else if (titleLower.contains('pattern') || titleLower.contains('circadian')) {
+      return Icons.trending_up;
+    } else if (titleLower.contains('best') || titleLower.contains('optimal')) {
+      return Icons.star;
+    } else if (titleLower.contains('consistency')) {
+      return Icons.schedule;
+    } else if (titleLower.contains('personalized')) {
+      return Icons.person;
+    }
+    return Icons.lightbulb;
+  }
+
+  Color _getInsightColor(String title) {
+    final titleLower = title.toLowerCase();
+    if (titleLower.contains('risk') || titleLower.contains('alert')) {
+      return Colors.red;
+    } else if (titleLower.contains('pattern') || titleLower.contains('circadian')) {
+      return Colors.blue;
+    } else if (titleLower.contains('best') || titleLower.contains('optimal')) {
+      return Colors.orange;
+    } else if (titleLower.contains('consistency')) {
+      return Colors.purple;
+    } else if (titleLower.contains('personalized')) {
+      return Colors.green;
+    }
+    return Colors.orange;
   }
 }

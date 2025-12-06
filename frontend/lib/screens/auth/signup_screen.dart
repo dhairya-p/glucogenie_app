@@ -23,6 +23,7 @@ class _SignupScreenState extends State<SignupScreen> {
   String _sex = 'Male';
   String? _ethnicity;
   int _age = 50;
+  int? _height;
   String? _activityLevel;
   
   List<String> _selectedConditions = [];
@@ -119,6 +120,7 @@ class _SignupScreenState extends State<SignupScreen> {
         lastName: _lastNameController.text.trim(),
         sex: _sex,
         age: _age,
+        height: _height,
         ethnicity: _ethnicity,
         location: _locationController.text.trim().isEmpty 
             ? null 
@@ -312,6 +314,39 @@ class _SignupScreenState extends State<SignupScreen> {
                   divisions: 82,
                   label: _age.toString(),
                   onChanged: (value) => setState(() => _age = value.toInt()),
+                ),
+                
+                const SizedBox(height: 16),
+                Text(
+                  _height != null ? 'Height: $_height cm *' : 'Height (cm) *',
+                  style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    hintText: '170',
+                    suffixText: 'cm',
+                    border: OutlineInputBorder(),
+                    helperText: 'Enter height in centimeters (50-250 cm)',
+                  ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Height is required';
+                    }
+                    final heightValue = int.tryParse(value);
+                    if (heightValue == null) {
+                      return 'Please enter a valid number';
+                    }
+                    if (heightValue < 50 || heightValue > 250) {
+                      return 'Height must be between 50-250 cm';
+                    }
+                    return null;
+                  },
+                  onChanged: (value) {
+                    final heightValue = int.tryParse(value);
+                    setState(() => _height = heightValue);
+                  },
                 ),
                 
                 const SizedBox(height: 16),

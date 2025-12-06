@@ -18,7 +18,9 @@ class PatientContext(BaseModel):
     age: int
     sex: Optional[str] = None
     ethnicity: str
+    height: Optional[int] = None  # Height in cm
     activity_level: Optional[str] = None
+    location: Optional[str] = None
     conditions: List[str]
     medications: Optional[List[str]] = None
 

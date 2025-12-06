@@ -75,7 +75,6 @@ class ChatController extends StateNotifier<ChatState> {
     await _subscription?.cancel();
 
     // Start listening to the SSE stream
-    print('---STARTING STREAM SUBSCRIPTION---');
     _subscription = service
         .streamChat(
           messages: history.map((m) => m.toJson()).toList(),
@@ -83,18 +82,13 @@ class ChatController extends StateNotifier<ChatState> {
         )
         .listen(
       (event) {
-        print('---CHAT EVENT RECEIVED IN PROVIDER---');
-        print('Event type: ${event.type}');
-        print('Event value: ${event.value}');
         
         if (event.type == 'tokens') {
           final token = (event.value ?? '').toString();
           if (token.isEmpty) {
-            print('Empty token, skipping');
             return;
           }
 
-          print('Adding token: $token');
           // Append or extend the latest assistant message
           final messages = List<ChatMessage>.from(state.messages);
           if (messages.isNotEmpty && messages.last.role == 'assistant') {
@@ -115,10 +109,18 @@ class ChatController extends StateNotifier<ChatState> {
           final eventName =
               (value is Map && value['event'] is String) ? value['event'] as String : '';
           print('Status event: $eventName');
-          state = state.copyWith(status: eventName);
+          // Only set status if it's an actual error, otherwise ignore non-error statuses
+          if (eventName.toLowerCase().contains('error')) {
+            state = state.copyWith(status: 'error: $eventName');
+          } else {
+            // For non-error statuses, don't set status (or clear it)
+            // This prevents false error displays
+            state = state.copyWith(status: null);
+          }
         } else if (event.type == 'done') {
           print('---DONE EVENT RECEIVED---');
-          state = state.copyWith(isStreaming: false);
+          // Clear status when done successfully
+          state = state.copyWith(isStreaming: false, status: null);
         } else if (event.type == 'error') {
           print('---ERROR EVENT RECEIVED---');
           state = state.copyWith(
@@ -133,12 +135,13 @@ class ChatController extends StateNotifier<ChatState> {
         print('Stack trace: $stackTrace');
         state = state.copyWith(
           isStreaming: false,
-          status: 'error',
+          status: 'error: $error',
         );
       },
       onDone: () {
         print('---PROVIDER STREAM DONE---');
-        state = state.copyWith(isStreaming: false);
+        // Clear status when stream completes successfully
+        state = state.copyWith(isStreaming: false, status: null);
       },
     );
   }

@@ -12,6 +12,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from supabase import Client, create_client
+from app.core.system_prompt_builder import build_system_prompt
+from app.core.timezone_utils import get_current_datetime_string
 
 # Configure logging to show INFO level and above
 logging.basicConfig(
@@ -264,18 +266,11 @@ async def _langchain_event_stream(
     )
 
     # Extract user_id from the authenticated user
-    logger.info("=== USER EXTRACTION DEBUG ===")
-    logger.info("User object type: %s", type(user).__name__)
-    logger.info("User object: %s", user)
-    logger.info("User object dir: %s", dir(user) if hasattr(user, '__dict__') else 'N/A')
-    
     user_id = ""
     if hasattr(user, "id"):
         user_id = str(user.id)
-        logger.info("Extracted user_id from user.id attribute: %s", user_id)
     elif isinstance(user, dict):
         user_id = str(user.get("id", ""))
-        logger.info("Extracted user_id from user dict: %s", user_id)
     elif hasattr(user, "__dict__"):
         # Try to get from __dict__
         user_dict = vars(user)
@@ -312,67 +307,80 @@ async def _langchain_event_stream(
         else:
             lc_messages.append(HumanMessage(content=content))
     
-    # Get patient context for system prompt
-    from app.core.chat_graph import _extract_patient_context
-    from app.schemas.patient_context import PatientContext
-    
+    # Get agent output (runs synchronously)
+    # This fetches enhanced context ONCE and shares it
+    logger.info("Starting agent routing for user_id: %s", user_id)
     patient_context_str = ""
     try:
-        if user_id:
-            patient = _extract_patient_context(user_id)
-            context_parts = []
-            if patient.full_name and patient.full_name != "there":
-                context_parts.append(f"Name: {patient.full_name}")
-            if patient.age:
-                context_parts.append(f"Age: {patient.age}")
-            if patient.sex:
-                context_parts.append(f"Sex: {patient.sex}")
-            if patient.ethnicity and patient.ethnicity != "Unknown":
-                context_parts.append(f"Ethnicity: {patient.ethnicity}")
-            if patient.activity_level:
-                context_parts.append(f"Activity Level: {patient.activity_level}")
-            if patient.conditions:
-                context_parts.append(f"Medical Conditions: {', '.join(patient.conditions)}")
-            if patient.medications:
-                context_parts.append(f"Medications: {', '.join(patient.medications)}")
-            
-            if context_parts:
-                patient_context_str = "\n".join(context_parts)
-                logger.info("Patient context for system prompt: %s", patient_context_str)
-    except Exception as exc:
-        logger.error("Error fetching patient context for system prompt: %s", exc, exc_info=True)
-    
-    # Get agent output (runs synchronously)
-    logger.info("Starting agent routing for user_id: %s", user_id)
-    try:
-        agent_output = _route_and_process({"messages": messages, "user_id": user_id})
+        agent_output = _route_and_process({"messages": messages, "user_id": user_id, "days": 7})
         agent_text = agent_output.get("output", "")
+        enhanced_context = agent_output.get("enhanced_context")
         logger.info("Agent output received: %s", agent_text[:200] if agent_text else "None")
         
-        # Build system prompt with patient context
-        system_prompt_parts = [
-            "You are a helpful diabetes management assistant.",
-        ]
-        
-        if patient_context_str:
-            system_prompt_parts.append(f"\nPatient Information:\n{patient_context_str}\n")
-        
-        if agent_text and not agent_text.startswith("I'm here to help"):
-            system_prompt_parts.append(
-                f"Use the following agent analysis to provide a clear, empathetic response to the user.\n"
-                f"Agent Analysis: {agent_text}\n\n"
-                "Respond naturally and conversationally based on this analysis."
-            )
-            lc_messages.insert(0, SystemMessage(content="\n".join(system_prompt_parts)))
-            logger.info("Using agent analysis in system prompt with patient context")
+        # Use enhanced context for system prompt if available (avoids redundant Supabase call)
+        if enhanced_context:
+            patient_context_str = enhanced_context.get_summary_string()
         else:
-            system_prompt_parts.append(
-                "Help users with questions about their glucose logs, meals, activity, and general diabetes management."
-            )
-            lc_messages.insert(0, SystemMessage(content="\n".join(system_prompt_parts)))
-            logger.info("Using default system prompt with patient context")
+            # Fallback to basic patient context (only if enhanced_context not available)
+            from app.core.chat_graph import _extract_patient_context
+            try:
+                if user_id:
+                    patient = _extract_patient_context(user_id)
+                    context_parts = []
+                    if patient.full_name and patient.full_name != "there":
+                        context_parts.append(f"Name: {patient.full_name}")
+                    if patient.age:
+                        context_parts.append(f"Age: {patient.age}")
+                    if patient.sex:
+                        context_parts.append(f"Sex: {patient.sex}")
+                    if patient.ethnicity and patient.ethnicity != "Unknown":
+                        context_parts.append(f"Ethnicity: {patient.ethnicity}")
+                    if patient.height:
+                        context_parts.append(f"Height: {patient.height} cm")
+                    if patient.activity_level:
+                        context_parts.append(f"Activity Level: {patient.activity_level}")
+                    if patient.location:
+                        context_parts.append(f"Location: {patient.location}")
+                    if patient.conditions:
+                        context_parts.append(f"Medical Conditions: {', '.join(patient.conditions)}")
+                    if patient.medications:
+                        context_parts.append(f"Medications: {', '.join(patient.medications)}")
+                    
+                    if context_parts:
+                        patient_context_str = "\n".join(context_parts)
+                        logger.info("Patient context for system prompt: %s", patient_context_str)
+            except Exception as exc:
+                logger.error("Error fetching patient context for system prompt: %s", exc, exc_info=True)
+        
+        # Extract user message for system prompt builder
+        user_message = ""
+        if messages:
+            last_msg = messages[-1]
+            user_message = last_msg.get("content", "") if isinstance(last_msg, dict) else str(last_msg)
+        
+        # Build system prompt using shared utility
+        system_prompt = build_system_prompt(
+            patient_context_str=patient_context_str or "",
+            enhanced_context=enhanced_context,
+            user_message=user_message,
+            agent_text=agent_text,
+        )
+        lc_messages.insert(0, SystemMessage(content=system_prompt))
     except Exception as exc:
         logger.error("Error in agent routing: %s", exc, exc_info=True)
+        # Fallback system prompt with patient context
+        user_message = ""
+        if messages:
+            last_msg = messages[-1]
+            user_message = last_msg.get("content", "") if isinstance(last_msg, dict) else str(last_msg)
+        
+        fallback_prompt = build_system_prompt(
+            patient_context_str=patient_context_str or "",
+            enhanced_context=None,
+            user_message=user_message,
+            agent_text=None,
+        )
+        lc_messages.insert(0, SystemMessage(content=fallback_prompt))
         # Fallback system prompt with patient context
         fallback_prompt = "You are a helpful diabetes management assistant. Respond to the user's question."
         if patient_context_str:
@@ -391,28 +399,6 @@ async def _langchain_event_stream(
 
     # Signal completion to the client
     yield "data: " + json.dumps({"type": "done"}) + "\n\n"
-
-
-@app.get("/debug/user")
-async def debug_user_endpoint(user: Any = Depends(get_current_user)) -> dict:
-    """Debug endpoint to check user authentication and ID extraction."""
-    user_id = ""
-    if hasattr(user, "id"):
-        user_id = str(user.id)
-    elif isinstance(user, dict):
-        user_id = str(user.get("id", ""))
-    elif hasattr(user, "__dict__"):
-        user_dict = vars(user)
-        user_id = str(user_dict.get("id", ""))
-    
-    return {
-        "user_type": type(user).__name__,
-        "user_repr": str(user),
-        "user_id": user_id,
-        "has_id_attr": hasattr(user, "id"),
-        "is_dict": isinstance(user, dict),
-        "user_dict": vars(user) if hasattr(user, "__dict__") else None,
-    }
 
 
 @app.post(
@@ -447,6 +433,70 @@ async def chat_stream_endpoint(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.get("/api/insights", response_model=dict)
+async def get_insights(
+    user: Any = Depends(get_current_user),
+) -> dict:
+    """Get personalized insights for the user.
+    
+    Returns top 2-3 insights calculated by the lifestyle analyst agent.
+    Returns empty list if insufficient data.
+    """
+    from app.core.chat_graph import _extract_enhanced_patient_context, _extract_patient_context
+    from app.agents.lifestyle_analyst_agent import analyze_lifestyle, LifestyleState
+    
+    try:
+        # Extract user_id
+        user_id = str(user.id) if hasattr(user, "id") else str(user.get("id", ""))
+        if not user_id:
+            return {"insights": [], "message": "User ID not found"}
+        
+        # Fetch enhanced context (this includes pattern analysis)
+        enhanced_context = _extract_enhanced_patient_context(user_id, days=7)
+        
+        # Extract patient context
+        patient_context = _extract_patient_context(user_id)
+        
+        # Run lifestyle analysis
+        state = LifestyleState(
+            user_id=user_id,
+            days=7,
+            patient=patient_context,
+            enhanced_context=enhanced_context,
+        )
+        
+        # analyze_lifestyle is a StructuredTool, must use .invoke()
+        result = analyze_lifestyle.invoke({"state": state})
+        
+        # Return top insights (2-3)
+        top_insights = result.get("top_insights", [])
+        
+        # Convert to list of dicts if needed
+        if top_insights and len(top_insights) > 0:
+            # Ensure they're dicts (not Pydantic models)
+            insights_list = []
+            for insight in top_insights[:3]:
+                if isinstance(insight, dict):
+                    insights_list.append(insight)
+                else:
+                    # Handle Pydantic model
+                    insights_list.append({
+                        "title": getattr(insight, "title", ""),
+                        "detail": getattr(insight, "detail", ""),
+                    })
+            
+            return {
+                "insights": insights_list,
+                "message": "success",
+            }
+        
+        # If insufficient data, return empty
+        return {"insights": [], "message": "Insufficient data for insights"}
+    except Exception as exc:
+        logger.error("Error fetching insights: %s", exc, exc_info=True)
+        return {"insights": [], "message": "Error generating insights"}
 
 
 # Future: include feature routers here, each using the shared auth + agents.

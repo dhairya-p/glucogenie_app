@@ -5,6 +5,7 @@ class UserProfile {
   final String? sex;
   final String? ethnicity;
   final int? age;
+  final int? height; // Height in cm
   final String? activityLevel;
   final String? location;
 
@@ -15,6 +16,7 @@ class UserProfile {
     this.sex,
     this.ethnicity,
     this.age,
+    this.height,
     this.activityLevel,
     this.location,
   });
@@ -27,6 +29,7 @@ class UserProfile {
       sex: json['sex'],
       ethnicity: json['ethnicity'],
       age: json['age'],
+      height: json['height'] != null ? (json['height'] is int ? json['height'] : (json['height'] as num).toInt()) : null,
       activityLevel: json['activity_level'],
       location: json['location'],
     );
@@ -40,6 +43,7 @@ class UserProfile {
       'sex': sex,
       'ethnicity': ethnicity,
       'age': age,
+      'height': height,
       'activity_level': activityLevel,
       'location': location,
     };
@@ -51,6 +55,7 @@ class UserProfile {
     String? sex,
     String? ethnicity,
     int? age,
+    int? height,
     String? activityLevel,
     String? location,
   }) {
@@ -61,6 +66,7 @@ class UserProfile {
       sex: sex ?? this.sex,
       ethnicity: ethnicity ?? this.ethnicity,
       age: age ?? this.age,
+      height: height ?? this.height,
       activityLevel: activityLevel ?? this.activityLevel,
       location: location ?? this.location,
     );
