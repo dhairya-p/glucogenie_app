@@ -381,11 +381,6 @@ async def _langchain_event_stream(
             agent_text=None,
         )
         lc_messages.insert(0, SystemMessage(content=fallback_prompt))
-        # Fallback system prompt with patient context
-        fallback_prompt = "You are a helpful diabetes management assistant. Respond to the user's question."
-        if patient_context_str:
-            fallback_prompt = f"You are a helpful diabetes management assistant.\n\nPatient Information:\n{patient_context_str}\n\nRespond to the user's question."
-        lc_messages.insert(0, SystemMessage(content=fallback_prompt))
     
     # Stream directly from LLM (this avoids pickling issues with astream_events)
     async for chunk in llm.astream(lc_messages):
@@ -515,5 +510,4 @@ if __name__ == "__main__":
         port=8000,
         reload=True,
     )
-
 
