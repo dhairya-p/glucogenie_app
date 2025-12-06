@@ -1,4 +1,5 @@
 # Miscellaneous
+*.md
 *.class
 *.log
 *.pyc
@@ -130,6 +131,3 @@ htmlcov/
 
 # Mac OS
 .DS_Store
-
-
-*.md
