@@ -68,6 +68,9 @@ class _GlucoseLogScreenState extends State<GlucoseLogScreen> {
       if (!mounted) return;
 
       if (success) {
+        // Refresh insights to update dashboard
+        context.read<DatabaseService>().fetchInsights();
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Reading saved successfully'),

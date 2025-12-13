@@ -47,36 +47,74 @@ class CulturalDietitianResult(BaseModel):
 def analyze_food_image(state: CulturalDietitianState) -> dict:
     """Analyze a food image and map it to Singaporean nutritional data.
 
-    This is a stub implementation that returns a plausible structure.
-    In production, this would:
-    - Call a Vision API to detect dishes.
-    - Map them to a nutrition database tuned for Singaporean cuisine.
+    Uses OpenAI Vision API (GPT-4o-mini) to detect dishes and provide nutritional analysis.
+    Specializes in Singaporean cuisine recognition.
     """
-
-    # Placeholder logic: pretend we detected a plate of chicken rice.
-    detected = [
-      FoodItem(
-          name="Hainanese chicken rice",
-          serving_size="1 plate",
-          carbs_g=60.0,
-          calories_kcal=600.0,
-          cuisine="Singaporean",
-      )
-    ]
-
-    result = CulturalDietitianResult(
-        detected_items=detected,
-        summary=(
-            "Based on the image, this looks like a plate of Hainanese chicken rice. "
-            "It is relatively high in carbohydrates, so consider pairing with more "
-            "non-starchy vegetables if you are watching your glucose levels."
-        ),
-        cultural_notes=(
-            "Hainanese chicken rice is a common dish in Singapore. "
-            "Portion control and balancing with greens can help with glycemic control."
-        ),
+    from app.services.image_analysis_service import (
+        analyze_meal_image,
+        analyze_meal_image_fallback,
+        ImageAnalysisError,
     )
+    import logging
 
-    return result.model_dump()
+    logger = logging.getLogger(__name__)
+
+    # Get image URL from state
+    image_url = state.image_url or state.image_path
+    if not image_url:
+        logger.warning("No image URL provided to cultural dietitian agent")
+        # Return fallback result
+        return CulturalDietitianResult(
+            detected_items=[],
+            summary="No image provided for analysis.",
+            cultural_notes="Please upload an image of your meal for nutritional analysis.",
+        ).model_dump()
+
+    try:
+        # Use the image analysis service
+        logger.info(f"Analyzing food image: {image_url}")
+        analysis = analyze_meal_image(
+            image_url=image_url,
+            enhanced_context=state.enhanced_context,
+            model="gpt-4o-mini",
+        )
+
+        # Convert analysis result to CulturalDietitianResult format
+        detected = [
+            FoodItem(
+                name=analysis.meal_name,
+                serving_size=analysis.portion_size or "Unknown",
+                carbs_g=analysis.estimated_carbs_g or 0.0,
+                calories_kcal=analysis.estimated_calories_kcal,
+                cuisine=analysis.cuisine_type,
+            )
+        ]
+
+        result = CulturalDietitianResult(
+            detected_items=detected,
+            summary=analysis.description,
+            cultural_notes=analysis.dietary_notes,
+        )
+
+        logger.info(f"Food analysis complete: {analysis.meal_name}")
+        return result.model_dump()
+
+    except ImageAnalysisError as exc:
+        logger.error(f"Image analysis failed: {exc}")
+        # Return fallback result
+        fallback = analyze_meal_image_fallback(image_url, state.enhanced_context)
+        return CulturalDietitianResult(
+            detected_items=[],
+            summary=fallback.description,
+            cultural_notes=fallback.dietary_notes,
+        ).model_dump()
+    except Exception as exc:
+        logger.error(f"Unexpected error in food analysis: {exc}", exc_info=True)
+        # Return generic fallback
+        return CulturalDietitianResult(
+            detected_items=[],
+            summary="Image uploaded but analysis failed. Please add meal details manually.",
+            cultural_notes="For best results, manually enter nutritional information.",
+        ).model_dump()
 
 

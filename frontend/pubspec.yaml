@@ -49,7 +49,11 @@ dependencies:
   intl: ^0.19.0
   shared_preferences: ^2.2.2
   http: ^1.1.0
-  
+
+  # Image Handling
+  image_picker: ^1.0.7
+  http_parser: ^4.0.2
+
   # Icons
   cupertino_icons: ^1.0.8
   flutter_dotenv: ^6.0.0

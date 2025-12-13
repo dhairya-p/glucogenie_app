@@ -366,10 +366,10 @@ def analyze_lifestyle(state: LifestyleState) -> dict:
         latest_glucose = latest_log.reading_mg_dl
         latest_glucose_timestamp = latest_log.timestamp
         
-        # Format timestamp for display
+        # Format timestamp for display (convert to Singapore timezone)
         try:
             dt = datetime.fromisoformat(latest_glucose_timestamp.replace(UTC_Z_SUFFIX, UTC_OFFSET_SUFFIX))
-            formatted_timestamp = dt.strftime("%B %d, %Y at %I:%M %p")
+            formatted_timestamp = format_singapore_datetime(dt, "%B %d, %Y at %I:%M %p")
         except Exception:
             formatted_timestamp = latest_glucose_timestamp
         

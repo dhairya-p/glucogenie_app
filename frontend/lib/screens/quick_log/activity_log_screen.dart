@@ -78,6 +78,9 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
     if (!mounted) return;
 
     if (success) {
+      // Refresh insights to update dashboard
+      context.read<DatabaseService>().fetchInsights();
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Activity logged successfully'),
