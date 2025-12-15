@@ -83,6 +83,9 @@ class EnhancedPatientContext(BaseModel):
     data_fetched_at: datetime
     days_of_history: int = 7  # Default to 7 days
     
+    # Long-horizon summary text (e.g. last 30 days), computed once per request
+    historical_summary: Optional[str] = None
+    
     model_config = ConfigDict(extra="ignore")
     
     def get_summary_string(self) -> str:

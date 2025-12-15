@@ -22,6 +22,7 @@ class Intent(str, Enum):
 
     MEDICAL = "medical"
     LIFESTYLE = "lifestyle"
+    MEAL_SUGGESTIONS = "meal_suggestions"
 
 
 class RouterState(BaseModel):
@@ -38,7 +39,12 @@ class RouterDecision(BaseModel):
 
     intent: Intent
     rationale: str
-    target_agent: Literal["clinical_safety", "lifestyle_analyst", "unmatched"]
+    target_agent: Literal[
+        "clinical_safety",
+        "lifestyle_analyst",
+        "cultural_dietitian",
+        "unmatched",
+    ]
 
     model_config = ConfigDict(extra="ignore")
 
@@ -52,7 +58,7 @@ def _build_routing_prompt(patient: PatientContext) -> str:
     Returns:
         System prompt for intent classification
     """
-    prompt = """You are an intelligent routing agent for a diabetes management application. Your task is to classify the user's query into one of three intents:
+    prompt = """You are an intelligent routing agent for a diabetes management application. Your task is to classify the user's query into one of three intents, and then choose the most appropriate specialist agent.
 
 **Intent Categories:**
 
@@ -80,13 +86,21 @@ def _build_routing_prompt(patient: PatientContext) -> str:
    - Weight tracking, BMI, health metrics
    - Medication adherence tracking (did I take my meds, logging history)
    - Recent logs, historical data analysis, patterns, trends
-   - Examples:
+   - Examples (lifestyle_analyst):
      * "What was my average glucose this week?"
      * "Show me my recent meals"
      * "Did I take my medication today?"
      * "What's my glucose trend over the past month?"
      * "Have I been exercising regularly?"
      * "What medications did I log recently?"
+
+3. **MEAL_SUGGESTIONS** (cultural_dietitian agent):
+   - Singapore-specific meal suggestions and recommendations
+   - Culturally appropriate meals based on ethnicity, location, and diabetes
+   - Questions like:
+     * "Give me meal suggestions for diabetes-friendly Singaporean food."
+     * "What should I eat for breakfast as a Malay patient in Singapore?"
+     * "What can I cook this week that fits my diabetes diet?"
 
 **Classification Rules:**
 
@@ -120,14 +134,14 @@ def _build_routing_prompt(patient: PatientContext) -> str:
 
 **Output Format (JSON):**
 {
-    "intent": "medical" | "lifestyle",
+    "intent": "medical" | "lifestyle" | "meal_suggestions",
     "rationale": "Brief explanation of why this intent was chosen (1-2 sentences)",
-    "target_agent": "clinical_safety" | "lifestyle_analyst" | "unmatched"
+    "target_agent": "clinical_safety" | "lifestyle_analyst" | "cultural_dietitian" | "unmatched"
 }
 
 **Important Notes:**
 - If the query does not clearly fit into MEDICAL or LIFESTYLE categories, use "unmatched" as target_agent
-- Only route to clinical_safety or lifestyle_analyst if the query is clearly related to diabetes management
+- Only route to clinical_safety, lifestyle_analyst, or cultural_dietitian if the query is clearly related to diabetes management
 - General conversation, greetings, or unrelated queries should be marked as "unmatched"
 
 **Important:**
@@ -152,7 +166,8 @@ def route_intent(state: RouterState) -> dict:
     Intent categories:
     - MEDICAL: Medication safety, side effects, interactions, dosage questions, clinical guidelines
     - LIFESTYLE: Glucose tracking, meal logs, activity patterns, adherence tracking
-    - UNMATCHED: Queries that don't fit medical or lifestyle categories (general conversation, unrelated topics)
+    - MEAL_SUGGESTIONS: Culturally appropriate meal recommendations and what to eat/cook
+    - UNMATCHED: Queries that don't fit these categories (general conversation, unrelated topics)
 
     Returns:
         RouterDecision with intent, rationale, and target_agent (or "unmatched" if query doesn't fit)
@@ -257,6 +272,16 @@ def _fallback_keyword_routing(state: RouterState) -> dict:
         "took medicine", "took insulin", "taken medicine", "taken insulin"
     ]
 
+    # Cultural diet / meal recommendation intent: culturally appropriate meal suggestions
+    cultural_diet_keywords = [
+        "meal suggestion", "meal suggestions", "what should i eat", "what should i cook",
+        "what can i eat", "what can i cook", "recommend me a meal", "recommend meals",
+        "food recommendations", "diet recommendations", "meal ideas", "what to eat",
+        "breakfast ideas", "lunch ideas", "dinner ideas", "healthy meals", "singapore food",
+        "singaporean food", "local food", "hawker food", "cuisine", "malay food",
+        "chinese food", "indian food"
+    ]
+
     # Check for medical/safety intent FIRST (higher priority for safety)
     if any(keyword in text for keyword in medical_safety_keywords):
         decision = RouterDecision(
@@ -270,6 +295,13 @@ def _fallback_keyword_routing(state: RouterState) -> dict:
             intent=Intent.LIFESTYLE,
             rationale="User asked about medication adherence, logging history, or recent medications taken. Requires lifestyle analyst for data analysis.",
             target_agent="lifestyle_analyst",
+        )
+    # Cultural diet / meal recommendation intent: meal ideas, what to eat/cook, Singapore-specific food
+    elif any(keyword in text for keyword in cultural_diet_keywords):
+        decision = RouterDecision(
+            intent=Intent.MEAL_SUGGESTIONS,
+            rationale="User asked for culturally appropriate meal suggestions or what to eat/cook. Requires cultural dietitian agent for Singapore-specific recommendations.",
+            target_agent="cultural_dietitian",
         )
     # General lifestyle intent: glucose logs, meals, activity, food patterns
     elif any(keyword in text for keyword in [

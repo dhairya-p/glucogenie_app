@@ -99,7 +99,7 @@ class _DashboardTabState extends State<DashboardTab> {
             ),
             const SizedBox(height: 24),
             Text(
-              "Today's Insights (AI-generated)",
+              "Insights (past 7 days, AI-generated)",
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),

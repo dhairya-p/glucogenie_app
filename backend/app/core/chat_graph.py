@@ -42,6 +42,7 @@ from app.core.timezone_utils import (
     format_singapore_datetime,
 )
 from app.core.system_prompt_builder import build_system_prompt
+from app.core.context_summarizer import summarize_enhanced_context
 
 logger = logging.getLogger(__name__)
 
@@ -375,12 +376,15 @@ def _extract_enhanced_patient_context(user_id: str, days: int = 7) -> EnhancedPa
         days_of_history=days,
     )
     
-    
     # Perform pattern analysis if we have sufficient data
     try:
         from app.core.pattern_analyzer import analyze_patterns
-        if (len(glucose_readings) >= 3 or len(meal_logs) >= 2 or 
-            len(medication_logs) >= 2 or len(activity_logs) >= 2):
+        if (
+            len(glucose_readings) >= 3
+            or len(meal_logs) >= 2
+            or len(medication_logs) >= 2
+            or len(activity_logs) >= 2
+        ):
             logger.info("Performing pattern analysis...")
             pattern_analysis = analyze_patterns(enhanced_context)
             enhanced_context.pattern_analysis = pattern_analysis
@@ -388,6 +392,26 @@ def _extract_enhanced_patient_context(user_id: str, days: int = 7) -> EnhancedPa
     except Exception as exc:
         logger.error("Error performing pattern analysis: %s", exc, exc_info=True)
         enhanced_context.pattern_analysis = None
+    
+    # Compute a longer-horizon summary string once per request
+    try:
+        summary_text = summarize_enhanced_context(enhanced_context)
+        if summary_text:
+            enhanced_context.historical_summary = summary_text
+    except Exception as exc:
+        logger.error("Error summarizing enhanced patient context: %s", exc, exc_info=True)
+        enhanced_context.historical_summary = None
+    
+    # Log summary metadata for debugging longer context window
+    try:
+        logger.info(
+            "Enhanced context built: days_of_history=%d, historical_summary_len=%d",
+            enhanced_context.days_of_history,
+            len(enhanced_context.historical_summary or ""),
+        )
+    except Exception:
+        # Logging must never break the request flow
+        pass
     
     return enhanced_context
 
@@ -460,8 +484,13 @@ def _route_and_process(input_data: dict[str, Any]) -> dict[str, Any]:
     messages = input_data.get("messages", [])
     user_id = input_data.get("user_id", "")
     days = input_data.get("days", 7)  # Default to 7 days of history
-
-    logger.info("_route_and_process called with user_id: %s, messages count: %d", user_id, len(messages))
+    
+    logger.info(
+        "_route_and_process called with user_id=%s, messages count=%d, days=%d",
+        user_id,
+        len(messages),
+        days,
+    )
 
     if not messages:
         return {"output": "No messages provided."}
@@ -526,10 +555,26 @@ def _route_and_process(input_data: dict[str, Any]) -> dict[str, Any]:
             rag_context = result.get('rag_context', '')
             logger.info("Lifestyle analyst output: %s", output[:200])  # Log first 200 chars
         elif target_agent == "cultural_dietitian":
-            dietitian_state = CulturalDietitianState(patient=patient, enhanced_context=enhanced_context)
-            result = analyze_food_image.invoke({"state": dietitian_state})
-            output = result.get("summary", "Food analysis not available.")
-            rag_context = result.get('rag_context', '')
+            # Cultural Dietitian Agent for Singapore-specific meal recommendations
+            dietitian_state = CulturalDietitianState(
+                patient=patient,
+                enhanced_context=enhanced_context,
+                user_message=user_text,
+            )
+            # Use text-based meal recommendation tool (not image analysis) for chat queries
+            from app.agents.cultural_dietitian_agent import recommend_cultural_meals
+
+            logger.info(
+                "[Router] Invoking Cultural Dietitian Agent for meal recommendations for user_id=%s",
+                user_id,
+            )
+            result = recommend_cultural_meals.invoke({"state": dietitian_state})
+            output = result.get("summary", "Cultural meal recommendations are not available at the moment.")
+            rag_context = result.get("rag_context", "")
+            logger.info(
+                "[Router] Cultural Dietitian Agent returned summary (first 200 chars): %s",
+                output[:200],
+            )
         else:
             # Unmatched query: return default response
             rag_context = ""
@@ -599,14 +644,19 @@ def get_chat_runnable() -> Any:
         # This will fetch enhanced context ONCE and share it
         rag_context = ""  # Initialize RAG context
         try:
-            agent_output = _route_and_process({"messages": messages, "user_id": user_id, "days": 7})
+            # Use a longer lookback (e.g. 30 days) for chatbot context summary
+            agent_output = _route_and_process({"messages": messages, "user_id": user_id, "days": 30})
             agent_text = agent_output.get("output", "")
             enhanced_context = agent_output.get("enhanced_context")  # Get enhanced context from route_and_process
             rag_context = agent_output.get("rag_context", "")  # Get RAG context from route_and_process
             
             # Use enhanced context for system prompt if available
             if enhanced_context:
-                patient_context_str = enhanced_context.get_summary_string()
+                # Prefer the longer-horizon summary if it was computed
+                if getattr(enhanced_context, "historical_summary", None):
+                    patient_context_str = enhanced_context.historical_summary or ""
+                else:
+                    patient_context_str = enhanced_context.get_summary_string()
             else:
                 # Fallback to basic patient context
                 try:

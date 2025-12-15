@@ -80,7 +80,8 @@ async def _langchain_event_stream(
     enhanced_context = None
 
     try:
-        agent_output = _route_and_process({"messages": messages, "user_id": user_id, "days": 7})
+        # Use a longer lookback (e.g. 30 days) for chatbot context summary
+        agent_output = _route_and_process({"messages": messages, "user_id": user_id, "days": 30})
         agent_text = agent_output.get("output", "")
         enhanced_context = agent_output.get("enhanced_context")
         rag_context = agent_output.get("rag_context", "")  # Extract RAG context for system prompt
@@ -89,7 +90,11 @@ async def _langchain_event_stream(
 
         # Use enhanced context for system prompt if available (avoids redundant Supabase call)
         if enhanced_context:
-            patient_context_str = enhanced_context.get_summary_string()
+            # Prefer the longer-horizon summary if it was computed
+            if getattr(enhanced_context, "historical_summary", None):
+                patient_context_str = enhanced_context.historical_summary or ""
+            else:
+                patient_context_str = enhanced_context.get_summary_string()
         else:
             # Fallback to basic patient context (only if enhanced_context not available)
             from app.core.chat_graph import _extract_patient_context

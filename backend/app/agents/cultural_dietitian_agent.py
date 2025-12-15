@@ -33,6 +33,7 @@ class CulturalDietitianState(BaseModel):
     image_url: Optional[str] = None
     image_path: Optional[str] = None
     enhanced_context: Optional[EnhancedPatientContext] = None  # Full context with recent logs
+    user_message: Optional[str] = None  # Optional free-text query for meal recommendations
 
     model_config = ConfigDict(extra="ignore")
 
@@ -189,5 +190,149 @@ def analyze_food_image(state: CulturalDietitianState) -> dict:
             summary="Image uploaded but analysis failed. Please add meal details manually.",
             cultural_notes="For best results, manually enter nutritional information.",
         ).model_dump()
+
+
+@tool("recommend_cultural_meals", return_direct=False)
+def recommend_cultural_meals(state: CulturalDietitianState) -> dict:
+    """Recommend culturally appropriate, Singapore-specific meals for the user.
+
+    Uses the Cultural Diet RAG namespace to retrieve diabetes-friendly dishes
+    tailored by ethnicity, location, and patient profile.
+    """
+    logger.info("[Cultural Dietitian Agent] recommend_cultural_meals invoked")
+    rag = get_rag_service()
+    rag_context = ""
+    rag_citations: list[str] = []
+
+    if not rag.is_available():
+        logger.warning("[Cultural Dietitian Agent] RAG service not available - returning generic advice")
+        summary = (
+            "I don't have access to detailed nutritional data right now, but in general for diabetes-friendly "
+            "Singaporean meals, focus on:\n"
+            "- Smaller portions of refined carbohydrates (e.g., white rice, noodles)\n"
+            "- More vegetables and lean protein (fish, tofu, skinless chicken)\n"
+            "- Less sugary drinks and desserts.\n\n"
+            "Ask again later once the medical knowledge base is available for more specific dish recommendations."
+        )
+        return {
+            "summary": summary,
+            "recommendations": [],
+            "rag_context": "",
+            "rag_citations": [],
+        }
+
+    # Build patient-aware query
+    patient = state.patient
+    base_query_parts = [
+        "Singapore diabetes-friendly meal recommendations",
+    ]
+    if state.user_message:
+        base_query_parts.append(state.user_message)
+    if patient.ethnicity:
+        base_query_parts.append(f"ethnicity {patient.ethnicity}")
+    if patient.location:
+        base_query_parts.append(f"location {patient.location}")
+    if patient.conditions:
+        base_query_parts.append(f"conditions {', '.join(patient.conditions)}")
+
+    query = " ".join(base_query_parts)
+    logger.info("[Cultural Dietitian Agent] Meal recommendation query: %s", query[:150])
+
+    try:
+        # STRICT NAMESPACE ISOLATION: Only query cultural-diet namespace
+        from app.services.rag_service import NAMESPACE_CULTURAL_DIET
+
+        results = rag.search(query, namespace=NAMESPACE_CULTURAL_DIET, top_k=5)
+        logger.info(
+            "[Cultural Dietitian Agent] RAG meal recommendation returned %d results from '%s' namespace",
+            len(results),
+            NAMESPACE_CULTURAL_DIET,
+        )
+
+        if not results:
+            summary = (
+                "I couldn't find specific diabetes-friendly Singaporean dishes in the knowledge base for your query. "
+                "A safe starting point is to choose meals that are:\n"
+                "- Lower in white rice and noodle portions\n"
+                "- Higher in vegetables and lean protein\n"
+                "- Less fried and less sweet.\n\n"
+                "Once more cultural diet data is ingested, I can give you dish-level suggestions."
+            )
+            return {
+                "summary": summary,
+                "recommendations": [],
+                "rag_context": "",
+                "rag_citations": [],
+            }
+
+        # Build a simple recommendation list from metadata
+        recommendations = []
+        for idx, r in enumerate(results[:5], start=1):
+            metadata = r.get("metadata", {}) or {}
+            dish_name = metadata.get("dish_name") or metadata.get("title") or f"Dish {idx}"
+            carbs = metadata.get("carbs_g")
+            calories = metadata.get("calories_kcal")
+            cuisine = metadata.get("cuisine") or metadata.get("cuisine_type")
+            source = metadata.get("source", "Unknown")
+
+            recommendations.append(
+                {
+                    "dish_name": dish_name,
+                    "carbs_g": carbs,
+                    "calories_kcal": calories,
+                    "cuisine": cuisine,
+                    "source": source,
+                }
+            )
+
+            if source and source != "Unknown":
+                rag_citations.append(source)
+
+        # Get formatted RAG context for the LLM system prompt (mandatory citations)
+        rag_context = rag.get_context_for_llm(
+            query,
+            namespace="cultural-diet",
+            top_k=3,
+            include_citations=True,
+        )
+        logger.info(
+            "[Cultural Dietitian Agent] RAG context for meal recommendations: %d characters",
+            len(rag_context) if rag_context else 0,
+        )
+
+        # High-level summary text for agent output (LLM will refine using rag_context)
+        dish_names = [r["dish_name"] for r in recommendations if r.get("dish_name")]
+        summary_lines = [
+            "Here are some Singapore-specific, diabetes-friendly meal ideas based on your profile:",
+        ]
+        if dish_names:
+            summary_lines.append("- Suggested dishes: " + ", ".join(dish_names[:5]))
+        summary_lines.append(
+            "These suggestions prioritize lower refined carbohydrates and higher vegetables/lean proteins, "
+            "while respecting local Singaporean cuisine and personalising suggestions to user's demographics like age, ethnicity, location, etc. where possible."
+        )
+
+        summary = "\n".join(summary_lines)
+
+        return {
+            "summary": summary,
+            "recommendations": recommendations,
+            "rag_context": rag_context,
+            "rag_citations": list(set(rag_citations)),
+        }
+
+    except Exception as exc:
+        logger.error("[Cultural Dietitian Agent] Error in recommend_cultural_meals: %s", exc, exc_info=True)
+        summary = (
+            "I encountered an error while looking up cultural diet recommendations. "
+            "For now, focus on smaller portions of rice/noodles, more vegetables, and lean protein. "
+            "Avoid sugary drinks and desserts where possible."
+        )
+        return {
+            "summary": summary,
+            "recommendations": [],
+            "rag_context": "",
+            "rag_citations": [],
+        }
 
 
