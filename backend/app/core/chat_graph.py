@@ -491,13 +491,14 @@ def _route_and_process(input_data: dict[str, Any]) -> dict[str, Any]:
     try:
         router_state = RouterState(patient=patient, user_message=user_text)
         routing_result = route_intent.invoke({"state": router_state})
-        target_agent = routing_result.get("target_agent", "chitchat")
+        target_agent = routing_result.get("target_agent", "unmatched")
         logger.info("Router selected target_agent: %s", target_agent)
     except Exception as exc:
         logger.error("Error in router: %s", exc, exc_info=True)
-        target_agent = "chitchat"
+        target_agent = "unmatched"
 
     # Call the appropriate agent (all agents receive enhanced_context if available)
+    rag_context = ""  # Collect RAG context from agent
     try:
         if target_agent == "clinical_safety":
             # Pass enhanced context to clinical safety agent
@@ -508,32 +509,47 @@ def _route_and_process(input_data: dict[str, Any]) -> dict[str, Any]:
             )
             result = check_clinical_safety.invoke({"state": safety_state})
             output = f"Safety check: {result.get('rationale', '')}. Warnings: {result.get('warnings', [])}"
+            rag_context = result.get('rag_context', '')
         elif target_agent == "lifestyle_analyst":
             # Pass enhanced context to lifestyle analyst (it can use pre-fetched data)
             lifestyle_state = LifestyleState(
                 patient=patient,
                 user_id=user_id,
                 days=days,
+                user_message=user_text,  # Pass user message for RAG queries
                 enhanced_context=enhanced_context  # Pass pre-fetched data
             )
             result = analyze_lifestyle.invoke({"state": lifestyle_state})
             insights = result.get("insights", [])
             insight_texts = [f"{i.get('title', '')}: {i.get('detail', '')}" for i in insights]
             output = "\n".join(insight_texts) if insight_texts else "No lifestyle insights available."
+            rag_context = result.get('rag_context', '')
             logger.info("Lifestyle analyst output: %s", output[:200])  # Log first 200 chars
         elif target_agent == "cultural_dietitian":
             dietitian_state = CulturalDietitianState(patient=patient, enhanced_context=enhanced_context)
             result = analyze_food_image.invoke({"state": dietitian_state})
             output = result.get("summary", "Food analysis not available.")
+            rag_context = result.get('rag_context', '')
         else:
-            # Chitchat: use LLM directly
-            output = "I'm here to help with your diabetes management. Ask me about your glucose logs, meals, or activity patterns!"
+            # Unmatched query: return default response
+            rag_context = ""
+            output = (
+                "I'm a specialized diabetes management assistant. I can only assist with:\n\n"
+                "• **Clinical Safety**: Medication safety, side effects, drug interactions, dosage questions, "
+                "and clinical guidelines (MOH, ADA, WHO recommendations)\n\n"
+                "• **Lifestyle Management**: Glucose tracking, meal logging, activity patterns, "
+                "medication adherence, and diabetes lifestyle insights\n\n"
+                "• **Food Analysis**: Nutritional information for Singaporean foods and meal planning\n\n"
+                "I'm unable to assist with general conversation, unrelated health topics, or queries outside "
+                "diabetes management. Please ask me about your diabetes care, medications, glucose readings, "
+                "meals, or activity patterns."
+            )
     except Exception as exc:
         logger.error("Error calling agent %s: %s", target_agent, exc, exc_info=True)
         output = f"Error processing request: {str(exc)}"
 
     logger.info("_route_and_process returning output: %s", output[:200])  # Log first 200 chars
-    return {"output": output, "enhanced_context": enhanced_context}  # Return context for use in system prompt
+    return {"output": output, "enhanced_context": enhanced_context, "rag_context": rag_context}  # Return RAG context for system prompt
 
 
 def get_chat_runnable() -> Any:
@@ -581,10 +597,12 @@ def get_chat_runnable() -> Any:
 
         # Get agent output (this runs synchronously but quickly)
         # This will fetch enhanced context ONCE and share it
+        rag_context = ""  # Initialize RAG context
         try:
             agent_output = _route_and_process({"messages": messages, "user_id": user_id, "days": 7})
             agent_text = agent_output.get("output", "")
             enhanced_context = agent_output.get("enhanced_context")  # Get enhanced context from route_and_process
+            rag_context = agent_output.get("rag_context", "")  # Get RAG context from route_and_process
             
             # Use enhanced context for system prompt if available
             if enhanced_context:
@@ -627,12 +645,17 @@ def get_chat_runnable() -> Any:
                 last_msg = messages[-1]
                 user_message = last_msg.get("content", "") if isinstance(last_msg, dict) else str(last_msg)
             
-            # Build system prompt using shared utility
+            # RAG context is already extracted from agent_output on line 596
+            # Each agent queries ONLY its assigned namespace and returns the context
+            # No mixing of namespaces - each agent's rag_context is from its namespace only
+            
+            # Build system prompt using shared utility (with RAG context from agent)
             system_prompt = build_system_prompt(
                 patient_context_str=patient_context_str or "",
                 enhanced_context=enhanced_context,
                 user_message=user_message,
                 agent_text=agent_text,
+                rag_context=rag_context,  # From agent_output - namespace-isolated by agent
             )
             lc_messages.insert(0, SystemMessage(content=system_prompt))
         except Exception as exc:
@@ -648,6 +671,7 @@ def get_chat_runnable() -> Any:
                 enhanced_context=None,
                 user_message=user_message,
                 agent_text=None,
+                rag_context="",
             )
             lc_messages.insert(0, SystemMessage(content=fallback_prompt))
 

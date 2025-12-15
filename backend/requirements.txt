@@ -30,3 +30,10 @@ httpx>=0.27.0             # Async HTTP client
 tenacity>=8.2.3           # For retrying failed LLM calls
 PyJWT>=2.8.0              # For JWT token decoding (fallback auth)
 Pillow>=10.0.0            # For image preprocessing and resizing
+
+# ---  PDF Processing (LlamaParse) ---
+llama-parse>=0.4.0        # LlamaParse for advanced PDF parsing (preserves tables)
+llama-index-core>=0.10.0  # Core LlamaIndex for document processing
+llama-index-embeddings-openai>=0.1.0  # OpenAI embeddings integration
+llama-index-vector-stores-pinecone>=0.1.0  # Pinecone vector store integration
+llama-index>=0.10.0       # Full LlamaIndex framework

@@ -3,7 +3,20 @@
     "allow": [
       "Bash(tree:*)",
       "Bash(find:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(flutter pub get:*)",
+      "Bash(flutter analyze:*)",
+      "Bash(flutter devices:*)",
+      "Bash(flutter build:*)",
+      "Bash(ls:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(python:*)",
+      "Bash(source:*)",
+      "Bash(chmod:*)"
     ]
+  },
+  "env": {
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": 64000
   }
 }
+

@@ -112,7 +112,7 @@ def analyze_lifestyle(state: LifestyleState) -> dict:
     Uses pandas DataFrames under the hood to compute simple aggregates.
     This is intentionally lightweight; more advanced analysis can be added later.
     """
-
+    
     insights: List[LifestyleInsight] = []
 
     # Use pre-fetched data if available (avoids redundant Supabase calls)
@@ -369,9 +369,10 @@ def analyze_lifestyle(state: LifestyleState) -> dict:
         # Format timestamp for display (convert to Singapore timezone)
         try:
             dt = datetime.fromisoformat(latest_glucose_timestamp.replace(UTC_Z_SUFFIX, UTC_OFFSET_SUFFIX))
-            formatted_timestamp = format_singapore_datetime(dt, "%B %d, %Y at %I:%M %p")
+            formatted_timestamp = format_singapore_datetime(dt, "%B %d, %Y at %I:%M %p SGT")
         except Exception:
-            formatted_timestamp = latest_glucose_timestamp
+            # Fallback: try to parse and add SGT
+            formatted_timestamp = f"{latest_glucose_timestamp} SGT" if latest_glucose_timestamp else "unknown time"
         
         # Basic stats
         insights.append(
@@ -503,11 +504,14 @@ def analyze_lifestyle(state: LifestyleState) -> dict:
         )
         
         # Activity recommendation
-        if avg_daily_minutes < 30:
+        weekly_target = 150  # minutes per week
+        daily_target = weekly_target / 7  # Convert to daily
+        
+        if avg_daily_minutes < daily_target:
             insights.append(
                 LifestyleInsight(
                     title="Activity recommendation",
-                    detail=f"Consider increasing activity. Current average: {avg_daily_minutes:.0f} min/day. Target: 150+ minutes/week (about 21+ min/day) of moderate activity for diabetes management.",
+                    detail=f"Consider increasing activity. Current average: {avg_daily_minutes:.0f} min/day. Target: {weekly_target}+ minutes/week (about {daily_target:.0f}+ min/day) of moderate activity for diabetes management.",
                 )
             )
         elif avg_daily_minutes >= 21:
@@ -728,10 +732,13 @@ def analyze_lifestyle(state: LifestyleState) -> dict:
             expected_days = state.days
             adherence_insights = []
             
+            # Adherence target: 80% for most diabetes medications
+            adherence_target = 80
+            
             for med_name, logged_count in med_frequency.items():
                 adherence_rate = (logged_count / expected_days) * 100 if expected_days > 0 else 0
-                if adherence_rate < 70:
-                    adherence_insights.append(f"{med_name}: {adherence_rate:.0f}% adherence (target: ≥80%)")
+                if adherence_rate < adherence_target:
+                    adherence_insights.append(f"{med_name}: {adherence_rate:.0f}% adherence (target: ≥{adherence_target}%)")
             
             if adherence_insights:
                 insights.append(
@@ -821,11 +828,13 @@ def analyze_lifestyle(state: LifestyleState) -> dict:
         
         # Hypertension considerations
         if "Hypertension" in state.patient.conditions or any("hypertension" in c.lower() or "high blood pressure" in c.lower() for c in state.patient.conditions):
-            if activity_logs and total_minutes < (state.days * 20):
+            daily_target_htn = 20  # minutes per day
+            
+            if activity_logs and total_minutes < (state.days * daily_target_htn):
                 insights.append(
                     LifestyleInsight(
                         title="Hypertension management",
-                        detail="Regular physical activity (150+ minutes/week) can help manage both diabetes and hypertension. Consider increasing your activity level.",
+                        detail=f"Regular physical activity ({daily_target_htn}+ minutes/day) can help manage both diabetes and hypertension. Consider increasing your activity level.",
                     )
                 )
     

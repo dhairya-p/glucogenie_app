@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../providers/chat_provider.dart';
 
@@ -276,10 +278,149 @@ class _ChatBubble extends StatelessWidget {
                     isUser ? const Radius.circular(4) : const Radius.circular(16),
               ),
             ),
-            child: Text(
-              message,
-              style: TextStyle(color: textColor),
-            ),
+            child: isUser
+                ? Text(
+                    message,
+                    style: TextStyle(color: textColor),
+                  )
+                : MarkdownBody(
+                    data: message,
+                    selectable: true,
+                    styleSheet: MarkdownStyleSheet(
+                      // Base text styling
+                      p: TextStyle(
+                        color: textColor,
+                        fontSize: 15,
+                        height: 1.5,
+                      ),
+                      // Headers
+                      h1: TextStyle(
+                        color: textColor,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        height: 1.3,
+                      ),
+                      h2: TextStyle(
+                        color: textColor,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        height: 1.3,
+                      ),
+                      h3: TextStyle(
+                        color: textColor,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        height: 1.3,
+                      ),
+                      h4: TextStyle(
+                        color: textColor,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        height: 1.3,
+                      ),
+                      h5: TextStyle(
+                        color: textColor,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        height: 1.3,
+                      ),
+                      h6: TextStyle(
+                        color: textColor,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        height: 1.3,
+                      ),
+                      // Bold text
+                      strong: TextStyle(
+                        color: textColor,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      // Italic text
+                      em: TextStyle(
+                        color: textColor,
+                        fontStyle: FontStyle.italic,
+                      ),
+                      // Code blocks
+                      code: TextStyle(
+                        color: textColor,
+                        backgroundColor: isUser
+                            ? Colors.white.withOpacity(0.2)
+                            : Colors.grey[300],
+                        fontFamily: 'monospace',
+                        fontSize: 14,
+                      ),
+                      codeblockDecoration: BoxDecoration(
+                        color: isUser
+                            ? Colors.white.withOpacity(0.15)
+                            : Colors.grey[300],
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      codeblockPadding: const EdgeInsets.all(12),
+                      // Blockquotes
+                      blockquote: TextStyle(
+                        color: textColor.withOpacity(0.8),
+                        fontStyle: FontStyle.italic,
+                      ),
+                      blockquoteDecoration: BoxDecoration(
+                        color: isUser
+                            ? Colors.white.withOpacity(0.1)
+                            : Colors.grey[300],
+                        border: Border(
+                          left: BorderSide(
+                            color: textColor.withOpacity(0.5),
+                            width: 4,
+                          ),
+                        ),
+                      ),
+                      blockquotePadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      // Lists
+                      listBullet: TextStyle(color: textColor),
+                      // Links
+                      a: TextStyle(
+                        color: isUser
+                            ? Colors.white
+                            : const Color(0xFF6366F1),
+                        decoration: TextDecoration.underline,
+                        decorationColor: isUser
+                            ? Colors.white
+                            : const Color(0xFF6366F1),
+                      ),
+                      // Horizontal rules
+                      horizontalRuleDecoration: BoxDecoration(
+                        border: Border(
+                          top: BorderSide(
+                            color: textColor.withOpacity(0.3),
+                            width: 1,
+                          ),
+                        ),
+                      ),
+                      // Table styling
+                      tableHead: TextStyle(
+                        color: textColor,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      tableBody: TextStyle(color: textColor),
+                      tableBorder: TableBorder.all(
+                        color: textColor.withOpacity(0.3),
+                        width: 1,
+                      ),
+                      // Spacing
+                      blockSpacing: 8.0,
+                      listIndent: 24.0,
+                      textScaleFactor: 1.0,
+                    ),
+                    onTapLink: (text, href, title) async {
+                      if (href != null) {
+                        final uri = Uri.parse(href);
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        }
+                      }
+                    },
+                  ),
           ),
         ),
       ],

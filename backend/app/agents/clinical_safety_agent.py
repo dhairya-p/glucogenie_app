@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel
@@ -8,6 +8,7 @@ from pydantic.config import ConfigDict
 
 from app.schemas.patient_context import PatientContext
 from app.schemas.enhanced_patient_context import EnhancedPatientContext
+from app.services.rag_service import get_rag_service
 
 
 class ClinicalSafetyState(BaseModel):
@@ -52,6 +53,94 @@ def check_clinical_safety(state: ClinicalSafetyState) -> dict:
     text = state.user_message.lower()
     warnings: List[str] = []
     enhanced = state.enhanced_context
+    
+    # Get RAG service for evidence-based safety checks
+    rag = get_rag_service()
+    rag_context = ""
+    rag_citations = []  # Store citations separately for system prompt
+    
+    logger.info(f"[Clinical Safety Agent] RAG service available: {rag.is_available()}")
+    
+    # Build patient context for RAG query enhancement
+    patient_context: Dict[str, Any] = {
+        "age": state.patient.age,
+        "conditions": state.patient.conditions or [],
+        "medications": state.patient.medications or [],
+        "sex": state.patient.sex,
+        "ethnicity": state.patient.ethnicity,
+    }
+    logger.debug(f"[Clinical Safety Agent] Patient context: age={patient_context['age']}, conditions={patient_context['conditions']}, medications={patient_context['medications']}")
+    
+    # Query RAG for relevant clinical safety information
+    if rag.is_available():
+        try:
+            logger.info("[Clinical Safety Agent] Checking user message for RAG-triggering keywords...")
+            # Extract key terms from user message for RAG query
+            rag_query_parts = []
+            
+            # Medication-specific keywords
+            if any(med in text for med in ["metformin", "insulin", "sulphonylurea", "glipizide", "glyburide"]):
+                for med in ["metformin", "insulin", "sulphonylurea", "glipizide", "glyburide"]:
+                    if med in text:
+                        rag_query_parts.append(med)
+                        logger.info(f"[Clinical Safety Agent] Detected medication keyword: {med}")
+                        break
+            
+            # Clinical condition keywords
+            if any(term in text for term in ["kidney", "renal", "eGFR"]):
+                rag_query_parts.append("kidney disease contraindication")
+                logger.info("[Clinical Safety Agent] Detected kidney-related keyword")
+            if any(term in text for term in ["skip meal", "skip meals", "fasting"]):
+                rag_query_parts.append("meal skipping hypoglycemia")
+                logger.info("[Clinical Safety Agent] Detected meal-skipping keyword")
+            if any(term in text for term in ["increase dose", "higher dose", "more medication"]):
+                rag_query_parts.append("dose adjustment")
+                logger.info("[Clinical Safety Agent] Detected dose adjustment keyword")
+            
+            # Clinical guidelines and recommendations keywords
+            guideline_keywords = [
+                "guideline", "guidelines", "recommendation", "recommendations", "protocol", "protocols",
+                "moh", "ministry of health", "ada", "american diabetes", "who", "world health",
+                "clinical standard", "medical standard", "best practice", "evidence-based",
+                "medical guideline", "treatment guideline", "diabetes guideline", "clinical protocol"
+            ]
+            if any(term in text for term in guideline_keywords):
+                logger.info("[Clinical Safety Agent] Detected clinical guidelines keyword")
+                # Extract the main topic from user message for guideline query
+                rag_query_parts.append(state.user_message[:200])  # Use user message as query
+            
+            # Build RAG query - use specific keywords if found, otherwise use user message
+            if rag_query_parts:
+                rag_query = " ".join(rag_query_parts)
+                logger.info(f"[Clinical Safety Agent] Querying RAG with: '{rag_query[:150]}...'")
+            else:
+                # Default: query RAG with user message for any clinical safety query
+                rag_query = state.user_message[:300]  # Use first 300 chars of user message
+                logger.info(f"[Clinical Safety Agent] No specific keywords found, querying RAG with user message: '{rag_query[:150]}...'")
+            
+            rag_results = rag.query_clinical_safety(rag_query, patient_context, top_k=3)
+            
+            if rag_results:
+                logger.info(f"[Clinical Safety Agent] RAG returned {len(rag_results)} results")
+                rag_context = rag.get_context_for_llm(
+                    rag_query,
+                    namespace="clinical-safety",
+                    top_k=3,
+                    include_citations=True
+                )
+                # Extract citations for system prompt
+                for result in rag_results:
+                    source = result.get('metadata', {}).get('source', 'Unknown')
+                    if source != 'Unknown':
+                        rag_citations.append(source)
+                logger.info(f"[Clinical Safety Agent] RAG context formatted: {len(rag_context)} characters")
+                logger.debug(f"[Clinical Safety Agent] RAG context preview: {rag_context[:200]}...")
+            else:
+                logger.warning("[Clinical Safety Agent] RAG query returned no results")
+        except Exception as e:
+            logger.error(f"[Clinical Safety Agent] RAG query failed: {e}", exc_info=True)
+    else:
+        logger.warning("[Clinical Safety Agent] RAG service not available - using fallback heuristics only")
 
     # Very conservative heuristics to flag when a human should review.
     if any(term in text for term in ["double dose", "extra dose", "overdose"]):
@@ -149,11 +238,16 @@ def check_clinical_safety(state: ClinicalSafetyState) -> dict:
             )
 
     is_safe = len(warnings) == 0
+    
+    # Build rationale (RAG context is passed separately to system prompt, not included here)
     rationale = (
         "No obvious red-flag patterns detected in the query based on patient context and recent data."
         if is_safe
         else f"One or more safety concerns were detected based on patient demographics, conditions, medications, and recent logs ({len(warnings)} warning(s)). A clinician should review."
     )
+    
+    # Note: RAG context is passed separately via rag_context field to system prompt
+    # It should NOT be included in the rationale to avoid duplication
 
     result = ClinicalSafetyResult(
         is_safe=is_safe,
@@ -167,5 +261,10 @@ def check_clinical_safety(state: ClinicalSafetyState) -> dict:
         enhanced.latest_glucose if enhanced else None
     )
 
-    return result.model_dump()
+    # Include RAG context in result for system prompt
+    result_dict = result.model_dump()
+    result_dict['rag_context'] = rag_context  # Full RAG context for system prompt
+    result_dict['rag_citations'] = list(set(rag_citations))  # Unique citations
+    
+    return result_dict
 

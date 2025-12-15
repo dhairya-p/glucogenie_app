@@ -1,6 +1,7 @@
 """System prompt builder for LLM context."""
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone as tz
 from typing import Optional, List
 
@@ -28,14 +29,23 @@ def build_system_prompt(
     enhanced_context: Optional[EnhancedPatientContext],
     user_message: str,
     agent_text: Optional[str],
+    rag_context: Optional[str] = None,
 ) -> str:
     """Build system prompt with patient context, current date/time, and relevant logs.
+    
+    IMPORTANT: This function does NOT query RAG. It receives pre-formatted rag_context
+    from the agent. Each agent queries ONLY its assigned namespace:
+    - Clinical Safety Agent → clinical-safety namespace only
+    - Cultural Dietitian Agent → cultural-diet namespace only
+    - Lifestyle Analyst Agent → lifestyle-patterns namespace only
+    No namespace mixing occurs - rag_context is already namespace-isolated by the agent.
     
     Args:
         patient_context_str: Formatted patient information string
         enhanced_context: Enhanced patient context with recent logs (optional)
         user_message: User's current message
         agent_text: Agent analysis output (optional)
+        rag_context: Pre-formatted RAG context string from agent (namespace-isolated)
         
     Returns:
         Complete system prompt string
@@ -47,6 +57,7 @@ def build_system_prompt(
         "You are a helpful diabetes management assistant.",
         f"\nCurrent Date and Time: {current_datetime_str} (Today is {current_date_str}).",
         "Use this information when answering questions about 'today', 'recent', or time-sensitive queries.",
+        "\n⚠️ CRITICAL TIMEZONE RULE: All timestamps in logs are stored in UTC, but you MUST always mention and display times in Singapore timezone (SGT) when talking to users. Never mention UTC times. Always convert and display times in Singapore timezone.",
     ]
     
     if patient_context_str:
@@ -97,9 +108,16 @@ def build_system_prompt(
         if contextual_insights:
             parts.append(f"\n{contextual_insights}\n")
 
-    # Add meal/medication/weight/activity logs if relevant
+    # Add meal/medication/weight/activity/glucose logs if relevant
     if enhanced_context:
         user_lower = user_message.lower()
+        
+        # Check for glucose readings (check first as it's commonly asked about)
+        glucose_keywords = ["glucose", "blood sugar", "sugar level", "reading", "readings", "bg", "blood glucose"]
+        if any(kw in user_lower for kw in glucose_keywords):
+            glucose_str = enhanced_context.get_recent_glucose_string(limit=10)
+            if glucose_str and "No recent glucose" not in glucose_str:
+                parts.append(f"\n{glucose_str}\n")
         
         # Check for meals
         if any(kw in user_lower for kw in MEAL_KEYWORDS):
@@ -132,17 +150,66 @@ def build_system_prompt(
             if activity_str and "No recent activity" not in activity_str:
                 parts.append(f"\n{activity_str}\n")
     
+    # Add RAG context (evidence-based guidelines) if available
+    # NOTE: This function does NOT query RAG itself - it receives pre-formatted rag_context string
+    # from the agent. Each agent queries ONLY its assigned namespace and formats the context.
+    # No namespace mixing occurs here - rag_context is already namespace-isolated by the agent.
+    if rag_context:
+        # Extract source names from RAG context for explicit citation examples
+        source_matches = re.findall(r'Source:\s*([^\n|]+)', rag_context)
+        unique_sources = list(set([s.strip() for s in source_matches if s.strip()]))[:5]  # Get unique sources
+        
+        source_list = ""
+        citation_examples = ""
+        if unique_sources:
+            source_list = "\n\n📋 SOURCE NAMES YOU MUST CITE (use these EXACT names):\n"
+            for i, src in enumerate(unique_sources, 1):
+                source_list += f"{i}. {src}\n"
+            
+            citation_examples = "\n\n✅ CORRECT Citation Examples (using actual sources above):\n"
+            for src in unique_sources[:3]:  # Show 3 examples
+                citation_examples += f"- 'According to {src}, ...'\n"
+                citation_examples += f"- 'Based on {src}, ...'\n"
+            citation_examples += "\n❌ INCORRECT (missing citation):\n"
+            citation_examples += "- 'The target HbA1c is 7.5%.' ❌\n"
+            citation_examples += "✅ CORRECT (with citation):\n"
+            if unique_sources:
+                citation_examples += f"- 'According to {unique_sources[0]}, the target HbA1c is 7.5%.' ✅\n"
+        
+        parts.append(
+            f"\n📚 Evidence-Based Medical Knowledge (with mandatory citations):\n{rag_context}\n"
+            "\n⚠️⚠️⚠️ CRITICAL: MANDATORY CITATION REQUIREMENT ⚠️⚠️⚠️"
+            "\n\nYou MUST include source citations in your response. This is NOT optional."
+            f"{source_list}"
+            "\n\nSTRICT RULES:"
+            "\n1. If you use ANY information from the RAG context above, you MUST cite the source"
+            "\n2. Use the EXACT source name from the list above (copy it exactly)"
+            "\n3. Citations must appear in the SAME sentence where you use the information"
+            "\n4. Do NOT put citations only at the end - integrate them naturally"
+            f"{citation_examples}"
+            "\n\nREQUIRED Citation Format (use these exact patterns with actual source names):"
+            "\n- 'According to [EXACT Source Name from list], ...'"
+            "\n- 'Based on [EXACT Source Name from list], ...'"
+            "\n- 'Per [EXACT Source Name from list], ...'"
+            "\n- 'The [EXACT Source Name from list] states/recommends that...'"
+            "\n\n❌ FORBIDDEN: Using RAG information without citing the EXACT source name"
+            "\n✅ REQUIRED: Every sentence using RAG information must include the source name"
+            "\n✅ REQUIRED: Copy source names EXACTLY as shown in the list above"
+        )
+    
     # Add agent output
     if agent_text and not agent_text.startswith("I'm here to help"):
         parts.append(
             f"Use the following agent analysis to provide a clear, empathetic response to the user.\n"
             f"Agent Analysis: {agent_text}\n\n"
-            "Respond naturally and conversationally based on this analysis. When the user asks about specific meals or medications they logged, refer to the detailed lists provided above."
+            "Respond naturally and conversationally based on this analysis. When the user asks about specific meals, medications, or glucose readings they logged, refer to the detailed lists provided above. "
+            "REMEMBER: Always mention times in Singapore timezone (SGT), never UTC. All timestamps in the logs above are already converted to Singapore time."
         )
     else:
         parts.append(
             "Help users with questions about their glucose logs, meals, activity, and general diabetes management. "
-            "When they ask about recent meals or medications, use the detailed lists provided above."
+            "When they ask about recent meals, medications, or glucose readings, use the detailed lists provided above. "
+            "REMEMBER: Always mention times in Singapore timezone (SGT), never UTC. All timestamps in the logs above are already converted to Singapore time."
         )
     
     return "\n".join(parts)

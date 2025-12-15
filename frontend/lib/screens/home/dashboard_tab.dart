@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:intl/intl.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../../services/database_service.dart';
 import '../ai_chatbot_screen.dart';
+import '../glucose_chart/glucose_chart_screen.dart';
 
 class DashboardTab extends StatefulWidget {
   const DashboardTab({Key? key}) : super(key: key);
@@ -64,85 +65,37 @@ class _DashboardTabState extends State<DashboardTab> {
               style: TextStyle(color: Colors.grey[600]),
             ),
             const SizedBox(height: 24),
-            Consumer<DatabaseService>(
-              builder: (context, dbService, _) {
-                final readings = dbService.glucoseReadings;
-                final latestReading = readings.isNotEmpty ? readings.first : null;
-                
-                return Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
+            SizedBox(
+              height: 220,
+              child: DefaultTabController(
+                length: 2,
+                child: Column(
+                  children: [
+                    TabBar(
+                      isScrollable: true,
+                      tabAlignment: TabAlignment.start,
+                      padding: EdgeInsets.zero,
+                      labelColor: Color(0xFF6366F1),
+                      unselectedLabelColor: Colors.grey,
+                      indicatorColor: Color(0xFF6366F1),
+                      labelStyle: TextStyle(fontWeight: FontWeight.bold),
+                      tabs: const [
+                        Tab(text: 'Latest Reading'),
+                        Tab(text: 'Weekly Chart'),
+                      ],
                     ),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: TabBarView(
                         children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '${latestReading?.reading.toInt() ?? 0}',
-                                style: TextStyle(
-                                  fontSize: 48,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              Text(
-                                'mg/dL',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  color: Colors.white70,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Container(
-                            height: 60,
-                            width: 100,
-                            decoration: BoxDecoration(
-                              color: Colors.white24,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Center(
-                              child: Icon(Icons.show_chart, 
-                                  color: Colors.white, size: 32),
-                            ),
-                          ),
+                          _buildLatestReadingCard(),
+                          _buildWeeklyChartCard(),
                         ],
                       ),
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.white24,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.info_outline, 
-                                color: Colors.white, size: 16),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Target range: 70-130 mg/dL before meals',
-                                style: TextStyle(color: Colors.white, fontSize: 12),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
+                    ),
+                  ],
+                ),
+              ),
             ),
             const SizedBox(height: 24),
             Text(
@@ -197,6 +150,199 @@ class _DashboardTabState extends State<DashboardTab> {
         ),
       ),
     );
+  }
+
+  Widget _buildLatestReadingCard() {
+    return Consumer<DatabaseService>(
+      builder: (context, dbService, _) {
+        final readings = dbService.glucoseReadings;
+        final latestReading = readings.isNotEmpty ? readings.first : null;
+
+        return Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${latestReading?.reading.toInt() ?? 0}',
+                        style: TextStyle(
+                          fontSize: 48,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      Text(
+                        'mg/dL',
+                        style: TextStyle(
+                          fontSize: 18,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    height: 60,
+                    width: 100,
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child: Icon(Icons.show_chart,
+                          color: Colors.white, size: 32),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline,
+                        color: Colors.white, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Target range: 70-130 mg/dL before meals',
+                        style: TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildWeeklyChartCard() {
+    return Consumer<DatabaseService>(
+      builder: (context, dbService, _) {
+        final readings = dbService.glucoseReadings;
+
+        // Get readings from the last 7 days
+        final now = DateTime.now();
+        final sevenDaysAgo = now.subtract(Duration(days: 7));
+        final weeklyReadings = readings.where((r) {
+          return r.createdAt.isAfter(sevenDaysAgo);
+        }).toList();
+
+        return GestureDetector(
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const GlucoseChartScreen(),
+              ),
+            );
+          },
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: weeklyReadings.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.insert_chart, color: Colors.white70, size: 32),
+                        const SizedBox(height: 8),
+                        Text(
+                          'No data for the past 7 days',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ],
+                    ),
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Past 7 Days',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          Icon(Icons.arrow_forward, color: Colors.white, size: 20),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: LineChart(
+                          LineChartData(
+                            gridData: FlGridData(show: false),
+                            titlesData: FlTitlesData(show: false),
+                            borderData: FlBorderData(show: false),
+                            lineBarsData: [
+                              LineChartBarData(
+                                spots: _getChartSpots(weeklyReadings),
+                                isCurved: true,
+                                color: Colors.white,
+                                barWidth: 3,
+                                dotData: FlDotData(show: false),
+                                belowBarData: BarAreaData(
+                                  show: true,
+                                  color: Colors.white.withOpacity(0.3),
+                                ),
+                              ),
+                            ],
+                            minY: 0,
+                            maxY: 300,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        );
+      },
+    );
+  }
+
+  List<FlSpot> _getChartSpots(List<dynamic> readings) {
+    if (readings.isEmpty) return [];
+
+    // Sort readings by createdAt
+    final sortedReadings = List.from(readings);
+    sortedReadings.sort((a, b) {
+      return a.createdAt.compareTo(b.createdAt);
+    });
+
+    // Create spots with index as x and reading as y
+    return sortedReadings.asMap().entries.map((entry) {
+      return FlSpot(entry.key.toDouble(), entry.value.reading.toDouble());
+    }).toList();
   }
 
   Widget _buildInsightCard({

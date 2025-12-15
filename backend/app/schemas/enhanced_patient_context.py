@@ -286,4 +286,35 @@ class EnhancedPatientContext(BaseModel):
         result += f"\n\nActivity Summary: Total {total_minutes} minutes, Average {avg_daily:.0f} min/session. Intensity breakdown: {intensity_summary}."
         
         return result
+    
+    def get_recent_glucose_string(self, limit: int = 10) -> str:
+        """Get a formatted string of recent glucose readings with times in Singapore timezone."""
+        if not self.recent_glucose_readings:
+            return "No recent glucose readings logged."
+        
+        from app.core.timezone_utils import parse_and_format_timestamp
+        
+        glucose_list = []
+        for reading in self.recent_glucose_readings[:limit]:
+            # Format timestamp in Singapore timezone
+            date_str = parse_and_format_timestamp(reading.timestamp, format_str="%Y-%m-%d %H:%M")
+            
+            reading_desc = f"{reading.reading:.1f} mg/dL"
+            if reading.timing:
+                reading_desc += f" ({reading.timing})"
+            if reading.notes:
+                reading_desc += f" - {reading.notes}"
+            
+            glucose_list.append(f"- {date_str} SGT: {reading_desc}")
+        
+        result = f"Recent Glucose Readings (last {len(self.recent_glucose_readings[:limit])}, times in Singapore timezone):\n" + "\n".join(glucose_list)
+        
+        # Add summary if available
+        if self.latest_glucose and self.latest_glucose_timestamp:
+            latest_time_str = parse_and_format_timestamp(self.latest_glucose_timestamp, format_str="%Y-%m-%d %H:%M")
+            result += f"\n\nLatest Reading: {self.latest_glucose:.1f} mg/dL at {latest_time_str} SGT"
+        if self.avg_glucose_7d:
+            result += f"\nAverage (7 days): {self.avg_glucose_7d:.1f} mg/dL"
+        
+        return result
 

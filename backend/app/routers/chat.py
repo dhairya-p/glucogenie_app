@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, Depends
@@ -82,7 +83,9 @@ async def _langchain_event_stream(
         agent_output = _route_and_process({"messages": messages, "user_id": user_id, "days": 7})
         agent_text = agent_output.get("output", "")
         enhanced_context = agent_output.get("enhanced_context")
+        rag_context = agent_output.get("rag_context", "")  # Extract RAG context for system prompt
         logger.info("Agent output received: %s", agent_text[:200] if agent_text else "None")
+        logger.info("RAG context extracted: %s characters", len(rag_context) if rag_context else 0)
 
         # Use enhanced context for system prompt if available (avoids redundant Supabase call)
         if enhanced_context:
@@ -125,13 +128,25 @@ async def _langchain_event_stream(
             last_msg = messages[-1]
             user_message = last_msg.get("content", "") if isinstance(last_msg, dict) else str(last_msg)
 
-        # Build system prompt using shared utility
+        # Build system prompt using shared utility (with RAG context from agent)
         system_prompt = build_system_prompt(
             patient_context_str=patient_context_str or "",
             enhanced_context=enhanced_context,
             user_message=user_message,
             agent_text=agent_text,
+            rag_context=rag_context,  # Pass RAG context to system prompt
         )
+        
+        # Log RAG context presence for debugging
+        if rag_context:
+            logger.info("RAG context included in system prompt: %d characters", len(rag_context))
+            # Extract source names for verification
+            sources = re.findall(r'Source:\s*([^\n|]+)', rag_context)
+            unique_sources = list(set([s.strip() for s in sources if s.strip()]))
+            logger.info("Source names in RAG context: %s", unique_sources[:5])  # Log first 5
+        else:
+            logger.info("No RAG context to include in system prompt")
+        
         lc_messages.insert(0, SystemMessage(content=system_prompt))
     except Exception as exc:
         logger.error("Error in agent routing: %s", exc, exc_info=True)
@@ -146,6 +161,7 @@ async def _langchain_event_stream(
             enhanced_context=None,
             user_message=user_message,
             agent_text=None,
+            rag_context="",  # No RAG context in fallback
         )
         lc_messages.insert(0, SystemMessage(content=fallback_prompt))
 
