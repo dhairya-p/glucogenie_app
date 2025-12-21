@@ -77,8 +77,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Diabetes Assistant Backend",
-    description="FastAPI backend for the Diabetes FYP (Supabase + Agents).",
+    title="GlucoGenie Backend",
+    description="FastAPI backend for the GlucoGenie FYP (Supabase + Agents).",
     version="0.1.0",
     lifespan=lifespan,
 )

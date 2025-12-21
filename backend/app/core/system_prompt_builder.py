@@ -57,7 +57,7 @@ def build_system_prompt(
         "You are a helpful diabetes management assistant.",
         f"\nCurrent Date and Time: {current_datetime_str} (Today is {current_date_str}).",
         "Use this information when answering questions about 'today', 'recent', or time-sensitive queries.",
-        "\n⚠️ CRITICAL TIMEZONE RULE: All timestamps in logs are stored in UTC, but you MUST always mention and display times in Singapore timezone (SGT) when talking to users. Never mention UTC times. Always convert and display times in Singapore timezone.",
+        "\nCRITICAL TIMEZONE RULE: All timestamps in logs are stored in UTC, but you MUST always mention and display times in Singapore timezone (SGT) when talking to users. Never mention UTC times. Always convert and display times in Singapore timezone.",
     ]
     
     if patient_context_str:
