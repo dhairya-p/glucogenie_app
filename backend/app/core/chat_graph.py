@@ -47,6 +47,18 @@ from app.core.context_summarizer import summarize_enhanced_context
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_UNMATCHED_RESPONSE = (
+    "I'm a specialized diabetes management assistant. I can only assist with:\n\n"
+    "• **Clinical Safety**: Medication safety, side effects, drug interactions, dosage questions, "
+    "and clinical guidelines (MOH, ADA, WHO recommendations)\n\n"
+    "• **Lifestyle Management**: Glucose tracking, meal logging, activity patterns, "
+    "medication adherence, and diabetes lifestyle insights\n\n"
+    "• **Food Analysis**: Nutritional information for Singaporean foods and meal planning\n\n"
+    "I'm unable to assist with general conversation, unrelated health topics, or queries outside "
+    "diabetes management. Please ask me about your diabetes care, medications, glucose readings, "
+    "meals, or activity patterns."
+)
+
 
 def _extract_enhanced_patient_context(user_id: str, days: int = 7) -> EnhancedPatientContext:
     """Fetch complete patient context including recent logs from Supabase.
@@ -589,17 +601,7 @@ def _route_and_process(input_data: dict[str, Any]) -> dict[str, Any]:
         else:
             # Unmatched query: return default response
             rag_context = ""
-            output = (
-                "I'm a specialized diabetes management assistant. I can only assist with:\n\n"
-                "• **Clinical Safety**: Medication safety, side effects, drug interactions, dosage questions, "
-                "and clinical guidelines (MOH, ADA, WHO recommendations)\n\n"
-                "• **Lifestyle Management**: Glucose tracking, meal logging, activity patterns, "
-                "medication adherence, and diabetes lifestyle insights\n\n"
-                "• **Food Analysis**: Nutritional information for Singaporean foods and meal planning\n\n"
-                "I'm unable to assist with general conversation, unrelated health topics, or queries outside "
-                "diabetes management. Please ask me about your diabetes care, medications, glucose readings, "
-                "meals, or activity patterns."
-            )
+            output = DEFAULT_UNMATCHED_RESPONSE
     except Exception as exc:
         logger.error("Error calling agent %s: %s", target_agent, exc, exc_info=True)
         output = f"Error processing request: {str(exc)}"

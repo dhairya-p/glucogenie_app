@@ -101,10 +101,13 @@ def _build_routing_prompt(patient: PatientContext) -> str:
 3. **MEAL_SUGGESTIONS** (cultural_dietitian agent):
    - Singapore-specific meal suggestions and recommendations
    - Culturally appropriate meals based on ethnicity, location, and diabetes
+   - Portion size, serving size, carb portions, and plate balance questions
    - Questions like:
      * "Give me meal suggestions for diabetes-friendly Singaporean food."
      * "What should I eat for breakfast as a Malay patient in Singapore?"
      * "What can I cook this week that fits my diabetes diet?"
+     * "How much rice should I eat per meal?"
+     * "What is a good portion size for noodles?"
 
 **Classification Rules:**
 
@@ -116,6 +119,8 @@ def _build_routing_prompt(patient: PatientContext) -> str:
 - **Data Analysis**: Questions about logs, trends, patterns, history, recent data → LIFESTYLE
 - **Avoidance/Safety**: Any question about "avoid", "wary", "mindful", "safe", "interaction" → MEDICAL
 - **General Management**: Broad questions about overall diabetes management without safety/interaction terms → LIFESTYLE
+- **Portion Size**: Any question about portion size, serving size, or carb portions → MEAL_SUGGESTIONS
+- **Recipes/Cooking**: Requests for recipes, cooking instructions, or how-to-cook should be marked as "unmatched"
 
 **Patient Context:**"""
 
