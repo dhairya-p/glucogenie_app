@@ -1,5 +1,6 @@
 # Miscellaneous
 *.md
+!notebooks/**/*.md
 *.class
 *.log
 *.pyc
