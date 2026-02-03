@@ -21,21 +21,25 @@ class ChatState {
     this.messages = const [],
     this.isStreaming = false,
     this.status,
+    this.statusDetails = const {},
   });
 
   final List<ChatMessage> messages;
   final bool isStreaming;
   final String? status;
+  final Map<String, String> statusDetails;
 
   ChatState copyWith({
     List<ChatMessage>? messages,
     bool? isStreaming,
     String? status,
+    Map<String, String>? statusDetails,
   }) {
     return ChatState(
       messages: messages ?? this.messages,
       isStreaming: isStreaming ?? this.isStreaming,
       status: status ?? this.status,
+      statusDetails: statusDetails ?? this.statusDetails,
     );
   }
 }
@@ -66,7 +70,12 @@ class ChatController extends StateNotifier<ChatState> {
     // Append user message to the conversation
     final history = List<ChatMessage>.from(state.messages)
       ..add(ChatMessage(role: 'user', content: userMessage));
-    state = state.copyWith(messages: history, isStreaming: true, status: null);
+    state = state.copyWith(
+      messages: history,
+      isStreaming: true,
+      status: null,
+      statusDetails: const {},
+    );
 
     // Create a new service bound to the current backend URL
     final service = ChatStreamService(baseUrl);
@@ -106,16 +115,24 @@ class ChatController extends StateNotifier<ChatState> {
           print('Updated messages count: ${messages.length}');
         } else if (event.type == 'status') {
           final value = event.value;
-          final eventName =
-              (value is Map && value['event'] is String) ? value['event'] as String : '';
-          print('Status event: $eventName');
-          // Only set status if it's an actual error, otherwise ignore non-error statuses
-          if (eventName.toLowerCase().contains('error')) {
-            state = state.copyWith(status: 'error: $eventName');
-          } else {
-            // For non-error statuses, don't set status (or clear it)
-            // This prevents false error displays
-            state = state.copyWith(status: null);
+          if (value is Map<String, dynamic>) {
+            final stage = value['stage']?.toString() ?? '';
+            final details = Map<String, String>.from(state.statusDetails);
+
+            if (stage == 'routing') {
+              details['Agent'] = value['agent']?.toString() ?? 'unmatched';
+            } else if (stage == 'rag') {
+              final sources = (value['sources'] as List?)?.map((s) => s.toString()).toList() ?? [];
+              if (sources.isNotEmpty) {
+                details['Sources'] = sources.join(', ');
+              }
+              final ragChars = value['rag_chars']?.toString();
+              if (ragChars != null) {
+                details['RAG chars'] = ragChars;
+              }
+            }
+
+            state = state.copyWith(status: null, statusDetails: details);
           }
         } else if (event.type == 'done') {
           print('---DONE EVENT RECEIVED---');

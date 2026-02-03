@@ -9,7 +9,7 @@ from pydantic.config import ConfigDict
 
 from app.schemas.patient_context import PatientContext
 from app.schemas.enhanced_patient_context import EnhancedPatientContext
-from app.services.rag_service import get_rag_service
+from app.services.rag_service import get_rag_service, NAMESPACE_CULTURAL_DIET
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +106,7 @@ def analyze_food_image(state: CulturalDietitianState) -> dict:
                     # Get formatted context for system prompt
                     rag_context = rag.get_context_for_llm(
                         analysis.meal_name,
-                        namespace="cultural-diet",
+                        namespace=NAMESPACE_CULTURAL_DIET,
                         top_k=1,
                         include_citations=True
                     )
@@ -212,6 +212,8 @@ def recommend_cultural_meals(state: CulturalDietitianState) -> dict:
             "- Smaller portions of refined carbohydrates (e.g., white rice, noodles)\n"
             "- More vegetables and lean protein (fish, tofu, skinless chicken)\n"
             "- Less sugary drinks and desserts.\n\n"
+            "Singapore-friendly alternatives: choose brown rice or smaller rice portions for chicken rice, "
+            "go for sliced fish soup with less rice/noodles, and pick yong tau foo with clear soup and more vegetables.\n\n"
             "Ask again later once the medical knowledge base is available for more specific dish recommendations."
         )
         return {
@@ -221,25 +223,32 @@ def recommend_cultural_meals(state: CulturalDietitianState) -> dict:
             "rag_citations": [],
         }
 
-    # Build patient-aware query
+    # Build patient-aware query (Singapore-first, demographic-aware)
     patient = state.patient
     base_query_parts = [
         "Singapore diabetes-friendly meal recommendations",
+        "Singaporean cuisine",
     ]
     if state.user_message:
         base_query_parts.append(state.user_message)
+    if patient.age:
+        base_query_parts.append(f"age {patient.age}")
     if patient.ethnicity:
         base_query_parts.append(f"ethnicity {patient.ethnicity}")
+    if patient.sex:
+        base_query_parts.append(f"sex {patient.sex}")
     if patient.location:
         base_query_parts.append(f"location {patient.location}")
     if patient.conditions:
         base_query_parts.append(f"conditions {', '.join(patient.conditions)}")
+    if patient.medications:
+        base_query_parts.append(f"medications {', '.join(patient.medications)}")
 
     query = " ".join(base_query_parts)
     logger.info("[Cultural Dietitian Agent] Meal recommendation query: %s", query[:150])
 
     try:
-        # STRICT NAMESPACE ISOLATION: Only query cultural-diet namespace
+        # STRICT NAMESPACE ISOLATION: Only query dietician_docs namespace
         from app.services.rag_service import NAMESPACE_CULTURAL_DIET
 
         results = rag.search(query, namespace=NAMESPACE_CULTURAL_DIET, top_k=5)
@@ -256,6 +265,8 @@ def recommend_cultural_meals(state: CulturalDietitianState) -> dict:
                 "- Lower in white rice and noodle portions\n"
                 "- Higher in vegetables and lean protein\n"
                 "- Less fried and less sweet.\n\n"
+                "Singapore-friendly alternatives: choose brown rice or smaller rice portions for chicken rice, "
+                "go for sliced fish soup with less rice/noodles, and pick yong tau foo with clear soup and more vegetables.\n\n"
                 "Once more cultural diet data is ingested, I can give you dish-level suggestions."
             )
             return {
@@ -291,7 +302,7 @@ def recommend_cultural_meals(state: CulturalDietitianState) -> dict:
         # Get formatted RAG context for the LLM system prompt (mandatory citations)
         rag_context = rag.get_context_for_llm(
             query,
-            namespace="cultural-diet",
+            namespace=NAMESPACE_CULTURAL_DIET,
             top_k=3,
             include_citations=True,
         )
@@ -302,14 +313,29 @@ def recommend_cultural_meals(state: CulturalDietitianState) -> dict:
 
         # High-level summary text for agent output (LLM will refine using rag_context)
         dish_names = [r["dish_name"] for r in recommendations if r.get("dish_name")]
+        profile_bits = []
+        if patient.age:
+            profile_bits.append(f"age {patient.age}")
+        if patient.ethnicity:
+            profile_bits.append(patient.ethnicity)
+        if patient.sex:
+            profile_bits.append(patient.sex)
+        if patient.location:
+            profile_bits.append(f"living in {patient.location}")
+        profile_line = ", ".join(profile_bits) if profile_bits else "your profile"
+
         summary_lines = [
-            "Here are some Singapore-specific, diabetes-friendly meal ideas based on your profile:",
+            f"Here are Singapore-specific, diabetes-friendly meal ideas tailored to {profile_line}:",
         ]
         if dish_names:
-            summary_lines.append("- Suggested dishes: " + ", ".join(dish_names[:5]))
+            summary_lines.append("- Suggested local dishes: " + ", ".join(dish_names[:5]))
         summary_lines.append(
-            "These suggestions prioritize lower refined carbohydrates and higher vegetables/lean proteins, "
-            "while respecting local Singaporean cuisine and personalising suggestions to user's demographics like age, ethnicity, location, etc. where possible."
+            "These focus on smaller portions of refined carbs (rice/noodles), more vegetables, "
+            "and lean protein common in Singaporean meals."
+        )
+        summary_lines.append(
+            "Singapore-friendly alternatives: choose brown rice or smaller rice portions for chicken rice, "
+            "go for sliced fish soup with less rice/noodles, and pick yong tau foo with clear soup and more vegetables."
         )
 
         summary = "\n".join(summary_lines)
@@ -326,7 +352,9 @@ def recommend_cultural_meals(state: CulturalDietitianState) -> dict:
         summary = (
             "I encountered an error while looking up cultural diet recommendations. "
             "For now, focus on smaller portions of rice/noodles, more vegetables, and lean protein. "
-            "Avoid sugary drinks and desserts where possible."
+            "Avoid sugary drinks and desserts where possible.\n\n"
+            "Singapore-friendly alternatives: choose brown rice or smaller rice portions for chicken rice, "
+            "go for sliced fish soup with less rice/noodles, and pick yong tau foo with clear soup and more vegetables."
         )
         return {
             "summary": summary,

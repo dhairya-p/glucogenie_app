@@ -85,8 +85,26 @@ async def _langchain_event_stream(
         agent_text = agent_output.get("output", "")
         enhanced_context = agent_output.get("enhanced_context")
         rag_context = agent_output.get("rag_context", "")  # Extract RAG context for system prompt
+        target_agent = agent_output.get("target_agent", "unmatched")
+        rag_sources = agent_output.get("rag_sources", [])
         logger.info("Agent output received: %s", agent_text[:200] if agent_text else "None")
         logger.info("RAG context extracted: %s characters", len(rag_context) if rag_context else 0)
+        logger.info("Target agent: %s", target_agent)
+
+        yield "data: " + json.dumps(
+            {"type": "status", "value": {"stage": "routing", "agent": target_agent}}
+        ) + "\n\n"
+        if rag_sources:
+            yield "data: " + json.dumps(
+                {
+                    "type": "status",
+                    "value": {
+                        "stage": "rag",
+                        "sources": rag_sources[:6],
+                        "rag_chars": len(rag_context) if rag_context else 0,
+                    },
+                }
+            ) + "\n\n"
 
         # Use enhanced context for system prompt if available (avoids redundant Supabase call)
         if enhanced_context:

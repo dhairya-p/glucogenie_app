@@ -8,7 +8,8 @@ from pydantic.config import ConfigDict
 
 from app.schemas.patient_context import PatientContext
 from app.schemas.enhanced_patient_context import EnhancedPatientContext
-from app.services.rag_service import get_rag_service
+from app.services.rag_service import get_rag_service, NAMESPACE_CLINICAL_SAFETY
+from app.services.neo4j_service import query_kg_relationships, format_kg_context
 
 
 class ClinicalSafetyState(BaseModel):
@@ -58,6 +59,8 @@ def check_clinical_safety(state: ClinicalSafetyState) -> dict:
     rag = get_rag_service()
     rag_context = ""
     rag_citations = []  # Store citations separately for system prompt
+    kg_context = ""
+    specific_findings: List[str] = []
     
     logger.info(f"[Clinical Safety Agent] RAG service available: {rag.is_available()}")
     
@@ -71,6 +74,25 @@ def check_clinical_safety(state: ClinicalSafetyState) -> dict:
     }
     logger.debug(f"[Clinical Safety Agent] Patient context: age={patient_context['age']}, conditions={patient_context['conditions']}, medications={patient_context['medications']}")
     
+    # Query Neo4j KG for relationships first (GraphRAG)
+    try:
+        if any(keyword in text for keyword in ["metformin", "insulin", "glipizide", "jardiance", "ozempic", "lantus"]):
+            logger.info("[Clinical Safety Agent] Querying Neo4j KG for drug interactions...")
+            kg_results = query_kg_relationships(state.user_message, limit=20)
+            kg_context = format_kg_context(kg_results)
+            if kg_results:
+                for item in kg_results[:6]:
+                    subject = item.get("subject", "Unknown")
+                    relation = str(item.get("relation", "related_to")).replace("_", " ").lower()
+                    obj = item.get("object", "Unknown")
+                    specific_findings.append(f"{subject} {relation} {obj}.")
+            if kg_context:
+                logger.info("[Clinical Safety Agent] KG context formatted: %d characters", len(kg_context))
+            else:
+                logger.info("[Clinical Safety Agent] No KG relationships found")
+    except Exception as exc:
+        logger.error("[Clinical Safety Agent] Neo4j KG query failed: %s", exc, exc_info=True)
+
     # Query RAG for relevant clinical safety information
     if rag.is_available():
         try:
@@ -96,6 +118,11 @@ def check_clinical_safety(state: ClinicalSafetyState) -> dict:
             if any(term in text for term in ["increase dose", "higher dose", "more medication"]):
                 rag_query_parts.append("dose adjustment")
                 logger.info("[Clinical Safety Agent] Detected dose adjustment keyword")
+
+            # General safety/avoidance queries should still use patient context
+            if any(term in text for term in ["avoid", "wary", "mindful", "watch out", "precaution", "risky", "dangerous"]):
+                rag_query_parts.append("drug food interactions precautions contraindications")
+                logger.info("[Clinical Safety Agent] Detected general safety/avoidance query")
             
             # Clinical guidelines and recommendations keywords
             guideline_keywords = [
@@ -116,6 +143,12 @@ def check_clinical_safety(state: ClinicalSafetyState) -> dict:
             else:
                 # Default: query RAG with user message for any clinical safety query
                 rag_query = state.user_message[:300]  # Use first 300 chars of user message
+                # If the user asks a generic safety question, add meds/conditions context
+                if any(term in text for term in ["avoid", "wary", "mindful", "watch out", "precaution"]):
+                    meds = ", ".join(state.patient.medications or [])
+                    conditions = ", ".join(state.patient.conditions or [])
+                    if meds or conditions:
+                        rag_query = f"{rag_query} medications {meds} conditions {conditions}"
                 logger.info(f"[Clinical Safety Agent] No specific keywords found, querying RAG with user message: '{rag_query[:150]}...'")
             
             rag_results = rag.query_clinical_safety(rag_query, patient_context, top_k=3)
@@ -124,7 +157,7 @@ def check_clinical_safety(state: ClinicalSafetyState) -> dict:
                 logger.info(f"[Clinical Safety Agent] RAG returned {len(rag_results)} results")
                 rag_context = rag.get_context_for_llm(
                     rag_query,
-                    namespace="clinical-safety",
+                    namespace=NAMESPACE_CLINICAL_SAFETY,
                     top_k=3,
                     include_citations=True
                 )
@@ -240,11 +273,24 @@ def check_clinical_safety(state: ClinicalSafetyState) -> dict:
     is_safe = len(warnings) == 0
     
     # Build rationale (RAG context is passed separately to system prompt, not included here)
-    rationale = (
-        "No obvious red-flag patterns detected in the query based on patient context and recent data."
+    meds_list = ", ".join(state.patient.medications or [])
+    conditions_list = ", ".join(state.patient.conditions or [])
+    meds_note = f"Your current medications: {meds_list}." if meds_list else "Your current medications: not available."
+    conditions_note = f"Your conditions: {conditions_list}." if conditions_list else "Your conditions: not available."
+    profile_note = ""
+    if meds_list and conditions_list:
+        profile_note = f"Given you're on {meds_list} and have {conditions_list}, "
+    elif meds_list:
+        profile_note = f"Given you're on {meds_list}, "
+    elif conditions_list:
+        profile_note = f"Given you have {conditions_list}, "
+
+    rationale_core = (
+        "no obvious red-flag patterns detected in the query based on patient context and recent data."
         if is_safe
-        else f"One or more safety concerns were detected based on patient demographics, conditions, medications, and recent logs ({len(warnings)} warning(s)). A clinician should review."
+        else f"one or more safety concerns were detected based on patient demographics, conditions, medications, and recent logs ({len(warnings)} warning(s)). A clinician should review."
     )
+    rationale = f"{meds_note} {conditions_note} {profile_note}{rationale_core}"
     
     # Note: RAG context is passed separately via rag_context field to system prompt
     # It should NOT be included in the rationale to avoid duplication
@@ -261,9 +307,11 @@ def check_clinical_safety(state: ClinicalSafetyState) -> dict:
         enhanced.latest_glucose if enhanced else None
     )
 
-    # Include RAG context in result for system prompt
+    # Combine KG + Pinecone RAG contexts for system prompt (KG first for deterministic relationships)
     result_dict = result.model_dump()
-    result_dict['rag_context'] = rag_context  # Full RAG context for system prompt
+    combined_context = "\n\n".join([c for c in [kg_context, rag_context] if c])
+    result_dict['rag_context'] = combined_context  # Full RAG context for system prompt
+    result_dict['specific_findings'] = specific_findings
     result_dict['rag_citations'] = list(set(rag_citations))  # Unique citations
     
     return result_dict

@@ -53,6 +53,7 @@ app.*.map.json
 # ======================
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 secring.gpg
@@ -115,12 +116,13 @@ htmlcov/
 # ======================
 # 4. IDEs & EDITORS
 # ======================
+# Claude Code
+.agents/
+.claude/
+
 # Cursor / VS Code
 .vscode/
-# Cursor: Keep .cursor/rules (committed)
-.cursor/state/
-.cursor/chat/
-.cursor/*.json
+.cursor/
 *.code-workspace
 
 # IntelliJ / Android Studio
@@ -131,3 +133,5 @@ htmlcov/
 
 # Mac OS
 .DS_Store
+
+.scripts/

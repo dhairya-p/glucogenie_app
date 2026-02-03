@@ -586,6 +586,7 @@ def _analyze_lifestyle_consistency(context: EnhancedPatientContext) -> Optional[
     areas_needing_improvement = []
     
     # Meal timing consistency
+    meal_consistency = 0.5
     meal_timing_scores = []
     if context.recent_meal_logs:
         meal_times = []

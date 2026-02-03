@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import os
 from pathlib import Path
 from typing import Any
@@ -537,7 +538,17 @@ def _route_and_process(input_data: dict[str, Any]) -> dict[str, Any]:
                 enhanced_context=enhanced_context  # Pass full context
             )
             result = check_clinical_safety.invoke({"state": safety_state})
-            output = f"Safety check: {result.get('rationale', '')}. Warnings: {result.get('warnings', [])}"
+            specific = result.get("specific_findings", [])
+            specific_text = ""
+            if specific:
+                specific_text = "Key interactions from your knowledge base:\n" + "\n".join(
+                    f"- {item}" for item in specific
+                )
+            output = (
+                f"Safety check: {result.get('rationale', '')}.\n"
+                f"Warnings: {result.get('warnings', [])}\n"
+                f"{specific_text}".strip()
+            )
             rag_context = result.get('rag_context', '')
         elif target_agent == "lifestyle_analyst":
             # Pass enhanced context to lifestyle analyst (it can use pre-fetched data)
@@ -594,7 +605,18 @@ def _route_and_process(input_data: dict[str, Any]) -> dict[str, Any]:
         output = f"Error processing request: {str(exc)}"
 
     logger.info("_route_and_process returning output: %s", output[:200])  # Log first 200 chars
-    return {"output": output, "enhanced_context": enhanced_context, "rag_context": rag_context}  # Return RAG context for system prompt
+    rag_sources = []
+    if rag_context:
+        rag_sources = re.findall(r"Source:\s*([^\n|]+)", rag_context)
+        rag_sources = list(dict.fromkeys([s.strip() for s in rag_sources if s.strip()]))
+
+    return {
+        "output": output,
+        "enhanced_context": enhanced_context,
+        "rag_context": rag_context,
+        "target_agent": target_agent,
+        "rag_sources": rag_sources,
+    }  # Return RAG context for system prompt
 
 
 def get_chat_runnable() -> Any:
@@ -649,6 +671,15 @@ def get_chat_runnable() -> Any:
             agent_text = agent_output.get("output", "")
             enhanced_context = agent_output.get("enhanced_context")  # Get enhanced context from route_and_process
             rag_context = agent_output.get("rag_context", "")  # Get RAG context from route_and_process
+            if rag_context:
+                source_count = rag_context.count("Source:")
+                logger.info(
+                    "RAG context attached: %d chars, %d source markers",
+                    len(rag_context),
+                    source_count,
+                )
+            else:
+                logger.info("No RAG context attached for this request")
             
             # Use enhanced context for system prompt if available
             if enhanced_context:

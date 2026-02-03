@@ -389,19 +389,7 @@ class _MealLogScreenState extends State<MealLogScreen> {
                   elevation: 4,
                 ),
               ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: () {
-                // TODO: Implement voice mode
-              },
-              icon: const Icon(Icons.mic),
-              label: const Text('Use voice mode'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.purple.withOpacity(0.1),
-                foregroundColor: Colors.purple,
-                padding: const EdgeInsets.all(16),
-              ),
-            ),
+            
             const SizedBox(height: 16),
             const Divider(),
             const SizedBox(height: 8),

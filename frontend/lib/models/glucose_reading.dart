@@ -12,7 +12,6 @@ class GlucoseReading {
     required this.reading,
     this.timing,
     this.notes,
-    this.photoUrl,
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
 
@@ -23,7 +22,6 @@ class GlucoseReading {
       reading: (json['reading'] as num).toDouble(),
       timing: json['timing'],
       notes: json['notes'],
-      photoUrl: json['photo_url'],
       createdAt: DateTime.parse(json['created_at']),
     );
   }

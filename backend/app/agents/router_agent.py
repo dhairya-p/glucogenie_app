@@ -66,6 +66,7 @@ def _build_routing_prompt(patient: PatientContext) -> str:
    - Medication safety, side effects, drug interactions, contraindications
    - Dosage questions, prescription advice, medication risks
    - Clinical warnings, precautions, adverse reactions
+   - Questions about what to avoid or be wary of with medications or conditions
    - Questions about medication compatibility, safety concerns
    - Clinical guidelines and recommendations (MOH, ADA, WHO, medical standards)
    - Evidence-based medical protocols and best practices
@@ -78,6 +79,8 @@ def _build_routing_prompt(patient: PatientContext) -> str:
      * "What do MOH guidelines say about diabetes management?"
      * "What are the ADA recommendations for blood sugar control?"
      * "Show me clinical guidelines for my medications"
+     * "What foods or drugs should I avoid?"
+     * "What should I be wary/mindful of with my medications?"
 
 2. **LIFESTYLE** (lifestyle_analyst agent):
    - Glucose tracking, blood sugar trends, readings analysis
@@ -93,6 +96,7 @@ def _build_routing_prompt(patient: PatientContext) -> str:
      * "What's my glucose trend over the past month?"
      * "Have I been exercising regularly?"
      * "What medications did I log recently?"
+     * "How is my diabetes management?"
 
 3. **MEAL_SUGGESTIONS** (cultural_dietitian agent):
    - Singapore-specific meal suggestions and recommendations
@@ -110,7 +114,8 @@ def _build_routing_prompt(patient: PatientContext) -> str:
   * Medication SAFETY questions (side effects, interactions) → MEDICAL
   * Medication TRACKING questions (did I take it, when did I take it) → LIFESTYLE
 - **Data Analysis**: Questions about logs, trends, patterns, history, recent data → LIFESTYLE
-- **Default to Safety**: When ambiguous and involves medications or clinical advice → MEDICAL (safer default)
+- **Avoidance/Safety**: Any question about "avoid", "wary", "mindful", "safe", "interaction" → MEDICAL
+- **General Management**: Broad questions about overall diabetes management without safety/interaction terms → LIFESTYLE
 
 **Patient Context:**"""
 
@@ -173,172 +178,47 @@ def route_intent(state: RouterState) -> dict:
         RouterDecision with intent, rationale, and target_agent (or "unmatched" if query doesn't fit)
     """
 
-    try:
-        # Get OpenAI API key
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        if not openai_api_key:
-            logger.warning("OPENAI_API_KEY not found, falling back to keyword-based routing")
-            return _fallback_keyword_routing(state)
-
-        # Build system prompt with patient context
-        system_prompt = _build_routing_prompt(state.patient)
-
-        # Initialize LLM
-        llm = ChatOpenAI(
-            model="gpt-4o-mini",
-            temperature=0.0,  # Deterministic routing
-            max_tokens=200,
-            api_key=openai_api_key,
-        )
-
-        # Create messages
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=f"User query: {state.user_message}"),
-        ]
-
-        logger.info(f"Routing query with LLM: {state.user_message[:100]}...")
-
-        # Call LLM
-        response = llm.invoke(messages)
-        response_text = response.content.strip()
-
-        logger.debug(f"LLM routing response: {response_text}")
-
-        # Parse JSON response
-        try:
-            # Extract JSON from response
-            json_start = response_text.find("{")
-            json_end = response_text.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                json_str = response_text[json_start:json_end]
-                result_dict = json.loads(json_str)
-
-                # Convert legacy "chitchat" to "unmatched"
-                if result_dict.get("target_agent") == "chitchat":
-                    result_dict["target_agent"] = "unmatched"
-                    logger.info("Converted legacy 'chitchat' to 'unmatched'")
-                
-                # Validate and create RouterDecision
-                decision = RouterDecision(**result_dict)
-                logger.info(f"Routed to {decision.target_agent}: {decision.rationale}")
-                return decision.model_dump()
-            else:
-                raise ValueError("No JSON found in LLM response")
-
-        except ValueError as exc:
-            logger.warning(f"Failed to parse LLM response as JSON: {exc}. Falling back to keyword routing.")
-            return _fallback_keyword_routing(state)
-
-    except Exception as exc:
-        logger.error(f"Error in LLM-based routing: {exc}. Falling back to keyword routing.", exc_info=True)
-        return _fallback_keyword_routing(state)
-
-
-def _fallback_keyword_routing(state: RouterState) -> dict:
-    """Fallback keyword-based routing when LLM is unavailable.
-
-    This is the original keyword-based implementation, used as a backup.
-    """
-    text = state.user_message.lower()
-
-    # Medical/Safety intent: medication safety, side effects, interactions, dosage questions, clinical guidelines
-    medical_safety_keywords = [
-        # Safety and side effects
-        "side effect", "side effects", "adverse", "reaction", "interaction", "interactions",
-        "safe to take", "can i take", "should i take", "is it safe", "is safe",
-        # Dosage
-        "dose", "dosage", "increase dose", "decrease dose", "change dose", "adjust dose",
-        "overdose", "double dose", "extra dose", "missed dose", "skip dose",
-        # Clinical warnings
-        "contraindication", "contraindicated", "warning", "warnings", "precaution",
-        "harmful", "dangerous", "risk", "risky", "compatible", "incompatible",
-        "prescription", "prescribed", "doctor said", "doctor told", "healthcare provider",
-        # Clinical guidelines and standards
-        "guideline", "guidelines", "recommendation", "recommendations", "protocol", "protocols",
-        "MOH", "ministry of health", "ADA", "american diabetes", "WHO", "world health",
-        "clinical standard", "medical standard", "best practice", "evidence-based",
-        "medical guideline", "treatment guideline", "diabetes guideline", "clinical protocol"
-    ]
-
-    # Lifestyle/Tracking intent: medication adherence, logging, history, recent medications
-    lifestyle_tracking_keywords = [
-        "did i take", "have i taken", "when did i take", "when did i log",
-        "recent medication", "recent med", "medication log", "med logs",
-        "medication history", "med history", "taking regularly", "taking consistently",
-        "adherence", "compliance", "missed", "forgot", "remember",
-        "what medication", "which medication", "medications i", "meds i",
-        "logged medication", "logged med", "took medication", "took med",
-        "took medicine", "took insulin", "taken medicine", "taken insulin"
-    ]
-
-    # Cultural diet / meal recommendation intent: culturally appropriate meal suggestions
-    cultural_diet_keywords = [
-        "meal suggestion", "meal suggestions", "what should i eat", "what should i cook",
-        "what can i eat", "what can i cook", "recommend me a meal", "recommend meals",
-        "food recommendations", "diet recommendations", "meal ideas", "what to eat",
-        "breakfast ideas", "lunch ideas", "dinner ideas", "healthy meals", "singapore food",
-        "singaporean food", "local food", "hawker food", "cuisine", "malay food",
-        "chinese food", "indian food"
-    ]
-
-    # Check for medical/safety intent FIRST (higher priority for safety)
-    if any(keyword in text for keyword in medical_safety_keywords):
-        decision = RouterDecision(
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    if not openai_api_key:
+        logger.error("OPENAI_API_KEY not found; routing to unmatched")
+        return RouterDecision(
             intent=Intent.MEDICAL,
-            rationale="User asked about medication safety, side effects, interactions, or dosage changes. Requires clinical safety agent.",
-            target_agent="clinical_safety",
-        )
-    # Check for lifestyle/tracking intent (medication adherence, logging history)
-    elif any(keyword in text for keyword in lifestyle_tracking_keywords):
-        decision = RouterDecision(
-            intent=Intent.LIFESTYLE,
-            rationale="User asked about medication adherence, logging history, or recent medications taken. Requires lifestyle analyst for data analysis.",
-            target_agent="lifestyle_analyst",
-        )
-    # Cultural diet / meal recommendation intent: meal ideas, what to eat/cook, Singapore-specific food
-    elif any(keyword in text for keyword in cultural_diet_keywords):
-        decision = RouterDecision(
-            intent=Intent.MEAL_SUGGESTIONS,
-            rationale="User asked for culturally appropriate meal suggestions or what to eat/cook. Requires cultural dietitian agent for Singapore-specific recommendations.",
-            target_agent="cultural_dietitian",
-        )
-    # General lifestyle intent: glucose logs, meals, activity, food patterns
-    elif any(keyword in text for keyword in [
-        "glucose", "blood sugar", "sugar level", "reading", "readings",
-        "log", "logs", "level", "levels", "measurement", "measurements",
-        "exercise", "walk", "walking", "activity", "activities",
-        "meal", "meals", "food", "diet", "eating", "carb", "carbs",
-        "breakfast", "lunch", "dinner", "snack", "pattern", "patterns",
-        "average", "trend", "trends", "history", "recent", "health", "BMI", "weight", "bmi", "height"
-    ]):
-        decision = RouterDecision(
-            intent=Intent.LIFESTYLE,
-            rationale="User asked about glucose logs, meals, or activity patterns.",
-            target_agent="lifestyle_analyst",
-        )
-    # Fallback: if query contains "medication" or "med" but doesn't match above patterns
-    elif "medication" in text or "med " in text or " medicine" in text:
-        if any(phrase in text for phrase in ["my medication", "my med", "medications i", "meds i"]):
-            decision = RouterDecision(
-                intent=Intent.LIFESTYLE,
-                rationale="User asked about their medications (likely tracking/adherence). Requires lifestyle analyst.",
-                target_agent="lifestyle_analyst",
-            )
-        else:
-            decision = RouterDecision(
-                intent=Intent.MEDICAL,
-                rationale="Ambiguous medication query - defaulting to clinical safety agent for safety.",
-                target_agent="clinical_safety",
-            )
-    else:
-        decision = RouterDecision(
-            intent=Intent.MEDICAL,  # Use MEDICAL as default enum value, but target_agent is "unmatched"
-            rationale="Query does not clearly fit medical or lifestyle categories.",
+            rationale="Router unavailable (missing OPENAI_API_KEY).",
             target_agent="unmatched",
-        )
+        ).model_dump()
 
-    logger.info(f"Keyword routing fallback: {decision.target_agent}")
+    system_prompt = _build_routing_prompt(state.patient)
+    llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=0.0,  # Deterministic routing
+        max_tokens=200,
+        api_key=openai_api_key,
+    )
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=f"User query: {state.user_message}"),
+    ]
+
+    logger.info("Routing query with LLM: %s...", state.user_message[:100])
+    response = llm.invoke(messages)
+    response_text = response.content.strip()
+    logger.debug("LLM routing response: %s", response_text)
+
+    json_start = response_text.find("{")
+    json_end = response_text.rfind("}") + 1
+    if json_start < 0 or json_end <= json_start:
+        logger.warning("No JSON found in LLM routing response; routing to unmatched")
+        return RouterDecision(
+            intent=Intent.MEDICAL,
+            rationale="Router returned non-JSON output.",
+            target_agent="unmatched",
+        ).model_dump()
+
+    result_dict = json.loads(response_text[json_start:json_end])
+    if result_dict.get("target_agent") == "chitchat":
+        result_dict["target_agent"] = "unmatched"
+    decision = RouterDecision(**result_dict)
+    logger.info("Routed to %s: %s", decision.target_agent, decision.rationale)
     return decision.model_dump()
 
 

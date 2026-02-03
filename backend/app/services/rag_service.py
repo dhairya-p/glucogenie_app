@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 # - Cultural Dietitian Agent → NAMESPACE_CULTURAL_DIET (via query_cultural_diet())
 # - Lifestyle Analyst Agent → NAMESPACE_LIFESTYLE_PATTERNS (via query_lifestyle_patterns())
 # Cross-namespace queries are NOT allowed for strict isolation.
-NAMESPACE_CLINICAL_SAFETY = "clinical-safety"
-NAMESPACE_CULTURAL_DIET = "cultural-diet"
+NAMESPACE_CLINICAL_SAFETY = "clinical_safety"
+NAMESPACE_CULTURAL_DIET = "dietician_docs"
 NAMESPACE_LIFESTYLE_PATTERNS = "lifestyle-patterns"
 
 
@@ -91,7 +91,7 @@ class RAGService:
         for idx, doc in enumerate(documents):
             record = {
                 "_id": f"{index_type}_{idx}",
-                "content": doc.strip(),
+                "text": doc.strip(),
                 "index_type": index_type,
             }
             records.append(record)
@@ -129,13 +129,12 @@ class RAGService:
         WARNING: This is an internal method. Agents should use namespace-specific methods:
         - query_clinical_safety() for Clinical Safety Agent
         - query_cultural_diet() for Cultural Dietitian Agent
-        - query_lifestyle_patterns() for Lifestyle Analyst Agent
         
         Args:
             query: Search query text
             index_type: Filter by knowledge type (e.g., 'drug', 'food', 'clinical')
             top_k: Number of results to return
-            namespace: REQUIRED - Specific namespace to search (clinical-safety, cultural-diet, lifestyle-patterns)
+            namespace: REQUIRED - Specific namespace to search (clinical_safety, dietician_docs, lifestyle-patterns)
             
         Returns:
             List of search results with content, score, and metadata
@@ -229,7 +228,7 @@ class RAGService:
         
         Args:
             query: Search query
-            namespace: REQUIRED - Specific namespace to search (clinical-safety, cultural-diet, lifestyle-patterns)
+            namespace: REQUIRED - Specific namespace to search (clinical_safety, dietician_docs, lifestyle-patterns)
                       MUST be provided - no default to prevent cross-namespace queries
             top_k: Number of results to return
             include_citations: Whether to include source citations (defaults to True - citations are mandatory)
@@ -335,7 +334,7 @@ class RAGService:
     ) -> List[Dict[str, Any]]:
         """Query clinical safety namespace for drug interactions, contraindications, etc.
         
-        IMPORTANT: This method ONLY queries the 'clinical-safety' namespace.
+        IMPORTANT: This method ONLY queries the 'clinical_safety' namespace.
         Use this method for Clinical Safety Agent queries.
         
         Args:
@@ -344,7 +343,7 @@ class RAGService:
             top_k: Number of results
             
         Returns:
-            List of relevant clinical safety documents from clinical-safety namespace only
+            List of relevant clinical safety documents from clinical_safety namespace only
         """
         if not self.is_available():
             logger.warning("[RAG] Clinical Safety query skipped - RAG service not available")
@@ -366,7 +365,7 @@ class RAGService:
             enhanced_query = " ".join(context_parts)
             logger.debug(f"[RAG] Enhanced query with patient context: '{enhanced_query[:150]}...'")
         
-        # STRICT NAMESPACE ISOLATION: Only query clinical-safety namespace
+        # STRICT NAMESPACE ISOLATION: Only query clinical_safety namespace
         results = self.search(enhanced_query, namespace=NAMESPACE_CLINICAL_SAFETY, top_k=top_k)
         logger.info(f"[RAG] Clinical Safety query returned {len(results)} results from namespace '{NAMESPACE_CLINICAL_SAFETY}' ONLY")
         if results:
@@ -381,7 +380,7 @@ class RAGService:
     ) -> List[Dict[str, Any]]:
         """Query cultural diet namespace for Singaporean food nutritional data.
         
-        IMPORTANT: This method ONLY queries the 'cultural-diet' namespace.
+        IMPORTANT: This method ONLY queries the 'dietician_docs' namespace.
         Use this method for Cultural Dietitian Agent queries.
         
         Args:
@@ -389,7 +388,7 @@ class RAGService:
             top_k: Number of results (usually 1 for exact match)
             
         Returns:
-            List of nutritional information for the dish from cultural-diet namespace only
+            List of nutritional information for the dish from dietician_docs namespace only
         """
         if not self.is_available():
             logger.warning(f"[RAG] Cultural Diet query skipped for '{dish_name}' - RAG service not available")
@@ -401,7 +400,7 @@ class RAGService:
         # Try exact match first, then semantic search
         query = f"{dish_name} nutritional profile calories carbohydrates Singapore"
         
-        # STRICT NAMESPACE ISOLATION: Only query cultural-diet namespace
+        # STRICT NAMESPACE ISOLATION: Only query dietician_docs namespace
         results = self.search(query, namespace=NAMESPACE_CULTURAL_DIET, top_k=top_k)
         logger.info(f"[RAG] Cultural Diet query returned {len(results)} results from namespace '{NAMESPACE_CULTURAL_DIET}' ONLY")
         if results:
@@ -469,7 +468,7 @@ class RAGService:
         
         Args:
             documents: List of document dicts with keys: content, metadata (source, tags, etc.)
-            namespace: Target namespace (clinical-safety, cultural-diet, lifestyle-patterns)
+            namespace: Target namespace (clinical_safety, dietician_docs, lifestyle-patterns)
             batch_size: Batch size for upsert (max 96 for text)
         """
         if not self.is_available():

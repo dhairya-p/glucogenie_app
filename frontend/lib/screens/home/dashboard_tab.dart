@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../services/database_service.dart';
-import '../ai_chatbot_screen.dart';
 import '../glucose_chart/glucose_chart_screen.dart';
 
 class DashboardTab extends StatefulWidget {
@@ -29,35 +28,19 @@ class _DashboardTabState extends State<DashboardTab> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Consumer<DatabaseService>(
-                  builder: (context, dbService, _) {
-                    final profile = dbService.userProfile;
-                    final firstName = profile?.firstName ?? 'there';
+            Consumer<DatabaseService>(
+              builder: (context, dbService, _) {
+                final profile = dbService.userProfile;
+                final firstName = profile?.firstName ?? 'there';
 
-                    return Text(
-                      'Hello, $firstName!',
-                      style: const TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    );
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.chat_bubble_outline),
-                  color: const Color(0xFF6366F1),
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const AiChatbotScreen(),
-                      ),
-                    );
-                  },
-                ),
-              ],
+                return Text(
+                  'Hello, $firstName!',
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 8),
             Text(

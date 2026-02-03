@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../services/database_service.dart';
 import '../profile/profile_screen.dart';
 import '../quick_log/quick_log_screen.dart';
+import '../ai_chatbot_screen.dart';
 import 'dashboard_tab.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -18,7 +19,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final List<Widget> _screens = [
     const DashboardTab(),
     const QuickLogScreen(),
-    const Center(child: Text('Learn Tab - Coming Soon')),
+    const AiChatbotScreen(),
     const ProfileScreen(),
   ];
 
@@ -45,7 +46,7 @@ class _HomeScreenState extends State<HomeScreen> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
           BottomNavigationBarItem(icon: Icon(Icons.assessment), label: 'Log'),
-          BottomNavigationBarItem(icon: Icon(Icons.school), label: 'Learn'),
+          BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: 'Chat'),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
         ],
       ),

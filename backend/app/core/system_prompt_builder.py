@@ -35,9 +35,9 @@ def build_system_prompt(
     
     IMPORTANT: This function does NOT query RAG. It receives pre-formatted rag_context
     from the agent. Each agent queries ONLY its assigned namespace:
-    - Clinical Safety Agent → clinical-safety namespace only
-    - Cultural Dietitian Agent → cultural-diet namespace only
-    - Lifestyle Analyst Agent → lifestyle-patterns namespace only
+    - Clinical Safety Agent → clinical_safety namespace only
+    - Cultural Dietitian Agent → dietician_docs namespace only
+    
     No namespace mixing occurs - rag_context is already namespace-isolated by the agent.
     
     Args:
@@ -55,6 +55,8 @@ def build_system_prompt(
     
     parts = [
         "You are a helpful diabetes management assistant.",
+        "Keep your response simple, clear, and easy for the average Singaporean user to understand.",
+        "Format all responses in clean Markdown (headings, short paragraphs, and bullet lists).",
         f"\nCurrent Date and Time: {current_datetime_str} (Today is {current_date_str}).",
         "Use this information when answering questions about 'today', 'recent', or time-sensitive queries.",
         "\nCRITICAL TIMEZONE RULE: All timestamps in logs are stored in UTC, but you MUST always mention and display times in Singapore timezone (SGT) when talking to users. Never mention UTC times. Always convert and display times in Singapore timezone.",

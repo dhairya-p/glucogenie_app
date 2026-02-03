@@ -16,12 +16,28 @@ class AiChatbotScreen extends ConsumerStatefulWidget {
 class _AiChatbotScreenState extends ConsumerState<AiChatbotScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final FocusNode _messageFocusNode = FocusNode();
 
   @override
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
+    _messageFocusNode.dispose();
     super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Request focus when screen is first shown
+    // Use a small delay to ensure the widget tree is fully built
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) {
+          _messageFocusNode.requestFocus();
+        }
+      });
+    });
   }
 
   void _sendMessage() {
@@ -46,8 +62,9 @@ class _AiChatbotScreenState extends ConsumerState<AiChatbotScreen> {
           accessToken: accessToken,
         );
 
-    // Scroll to bottom after a short delay
+    // Keep focus on the text field and scroll to bottom after a short delay
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _messageFocusNode.requestFocus();
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
@@ -71,10 +88,6 @@ class _AiChatbotScreenState extends ConsumerState<AiChatbotScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
         title: const Text('Chat with GlucoGenie'),
         centerTitle: true,
         elevation: 0,
@@ -121,8 +134,10 @@ class _AiChatbotScreenState extends ConsumerState<AiChatbotScreen> {
                     },
                   ),
           ),
-          // Status indicator - only show errors, not regular status messages
-          if (chatState.isStreaming || (chatState.status != null && chatState.status!.startsWith('error')))
+          // Status indicator - show agent + sources during streaming, errors always
+          if (chatState.isStreaming ||
+              (chatState.status != null && chatState.status!.startsWith('error')) ||
+              chatState.statusDetails.isNotEmpty)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               color: chatState.status != null && chatState.status!.startsWith('error')
@@ -143,13 +158,8 @@ class _AiChatbotScreenState extends ConsumerState<AiChatbotScreen> {
                     ),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text(
-                        'AI is thinking...',
-                        style: TextStyle(
-                          color: Colors.grey[700],
-                          fontSize: 12,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                      child: _StatusDetails(
+                        statusDetails: chatState.statusDetails,
                       ),
                     ),
                   ],
@@ -195,6 +205,8 @@ class _AiChatbotScreenState extends ConsumerState<AiChatbotScreen> {
                 Expanded(
                   child: TextField(
                     controller: _messageController,
+                    focusNode: _messageFocusNode,
+                    autofocus: true,
                     enabled: !chatState.isStreaming,
                     decoration: InputDecoration(
                       hintText: chatState.isStreaming
@@ -423,6 +435,43 @@ class _ChatBubble extends StatelessWidget {
                   ),
           ),
         ),
+      ],
+    );
+  }
+}
+
+class _StatusDetails extends StatelessWidget {
+  final Map<String, String> statusDetails;
+
+  const _StatusDetails({required this.statusDetails});
+
+  @override
+  Widget build(BuildContext context) {
+    if (statusDetails.isEmpty) {
+      return Text(
+        'Processing...',
+        style: TextStyle(
+          color: Colors.grey[700],
+          fontSize: 12,
+        ),
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+
+    final entries = statusDetails.entries.toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final entry in entries)
+          Text(
+            '${entry.key}: ${entry.value}',
+            style: TextStyle(
+              color: Colors.grey[700],
+              fontSize: 12,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
       ],
     );
   }
