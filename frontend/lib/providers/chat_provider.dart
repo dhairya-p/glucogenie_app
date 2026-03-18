@@ -62,6 +62,11 @@ class ChatController extends StateNotifier<ChatState> {
     state = state.copyWith(messages: updated);
   }
 
+  /// Clear all messages and reset state. Call on logout.
+  void clear() {
+    state = const ChatState();
+  }
+
   Future<void> startStreaming({
     required String userMessage,
     required String baseUrl,

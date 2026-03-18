@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:provider/provider.dart';
+import '../../providers/chat_provider.dart';
 import '../../services/auth_service.dart';
 import '../../services/database_service.dart';
 import '../auth/login_screen.dart';
@@ -71,6 +73,10 @@ class ProfileScreen extends StatelessWidget {
               OutlinedButton(
                 onPressed: () async {
                   await context.read<AuthService>().signOut();
+                  // Clear chatbot conversation so next user starts fresh
+                  ProviderScope.containerOf(context)
+                      .read(chatControllerProvider.notifier)
+                      .clear();
                   if (!context.mounted) return;
                   Navigator.of(context).pushAndRemoveUntil(
                     MaterialPageRoute(builder: (_) => const LoginScreen()),
