@@ -191,7 +191,7 @@ async def _langchain_event_stream(
     # Initialize LLM for streaming
     llm = ChatOpenAI(
         model="gpt-4o-mini",
-        temperature=0.7,
+        temperature=0.3,  # Medical app: present agent/RAG analysis clearly, not improvise
         streaming=True,
         api_key=openai_api_key,
     )

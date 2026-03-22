@@ -45,28 +45,34 @@ def _build_analysis_prompt(enhanced_context: Optional[EnhancedPatientContext] = 
     Returns:
         System prompt for Vision API
     """
-    base_prompt = """You are an expert dietitian specializing in Singaporean cuisine and diabetes management.
+    base_prompt = """You are an expert dietitian specializing in meal recognition and diabetes management.
 
-Analyze this meal image and provide detailed nutritional information.
+Analyze this meal image and provide accurate nutritional information based on what you ACTUALLY see.
+
+**CRITICAL - Accuracy first:**
+- Identify the meal EXACTLY as it appears in the image. Do NOT force-fit to any cuisine or dish type.
+- If the image shows pizza, burger, salad, Western food, sushi, or any non-Singaporean dish, report it accurately.
+- If the image shows Singaporean/local dishes (Chicken Rice, Laksa, Roti Prata, Nasi Lemak, etc.), identify them correctly.
+- Your macros MUST reflect what you actually see: portion size, visible ingredients, and preparation method.
+- Never substitute a different dish name or macros to match a database—accuracy over assumptions.
 
 **Your task:**
-1. Identify the meal name (especially Singaporean dishes like Chicken Rice, Laksa, Roti Prata, Nasi Lemak, etc.)
+1. Identify the meal name as it actually appears (any cuisine)
 2. Describe the visible ingredients and cooking method
 3. Estimate portion size (small/medium/large or specific measurements)
-4. Provide approximate nutritional values:
+4. Provide approximate nutritional values based on what you see:
    - Carbohydrates (grams)
    - Calories (kcal)
    - Protein (grams)
    - Fat (grams)
 5. Identify cuisine type (Singaporean, Chinese, Indian, Malay, Western, etc.)
-6. Provide diabetes-specific dietary advice
+6. Provide diabetes-specific dietary advice for the actual meal shown
 
-**Important guidelines:**
-- Be specific about Singaporean dishes - recognize local favorites
-- Focus on carbohydrate content as it's crucial for diabetes management
+**Guidelines:**
+- Focus on carbohydrate content for diabetes management
 - Consider glycemic index and glycemic load
 - Provide practical, actionable dietary advice
-- If uncertain, indicate your confidence level
+- If uncertain, indicate your confidence level (low/medium/high)
 """
 
     # Add patient context if available
@@ -144,7 +150,7 @@ def analyze_meal_image(
         # Initialize Vision-capable LLM
         llm = ChatOpenAI(
             model=model,
-            temperature=0.3,  # Low temperature for consistent output
+            temperature=0.1,  # Structured JSON (carbs, calories, etc.) — same plate ~similar estimates
             max_tokens=800,
             api_key=openai_api_key,
         )

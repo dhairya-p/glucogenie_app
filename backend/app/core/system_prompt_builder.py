@@ -12,14 +12,13 @@ from app.core.constants import (
     MEDICATION_PHRASES,
     MEAL_KEYWORDS,
     WEIGHT_KEYWORDS,
-    UTC_Z_SUFFIX,
-    UTC_OFFSET_SUFFIX,
 )
 from app.core.timezone_utils import (
     get_current_datetime_string,
     format_singapore_datetime,
     get_singapore_now,
     get_today_start_singapore,
+    parse_iso_to_utc_datetime,
 )
 from app.schemas.enhanced_patient_context import EnhancedPatientContext
 
@@ -157,46 +156,14 @@ def build_system_prompt(
     # from the agent. Each agent queries ONLY its assigned namespace and formats the context.
     # No namespace mixing occurs here - rag_context is already namespace-isolated by the agent.
     if rag_context:
-        # Extract source names from RAG context for explicit citation examples
+        # Single consolidated citation rule (no duplication with rag_service)
         source_matches = re.findall(r'Source:\s*([^\n|]+)', rag_context)
-        unique_sources = list(set([s.strip() for s in source_matches if s.strip()]))[:5]  # Get unique sources
-        
-        source_list = ""
-        citation_examples = ""
-        if unique_sources:
-            source_list = "\n\n📋 SOURCE NAMES YOU MUST CITE (use these EXACT names):\n"
-            for i, src in enumerate(unique_sources, 1):
-                source_list += f"{i}. {src}\n"
-            
-            citation_examples = "\n\n✅ CORRECT Citation Examples (using actual sources above):\n"
-            for src in unique_sources[:3]:  # Show 3 examples
-                citation_examples += f"- 'According to {src}, ...'\n"
-                citation_examples += f"- 'Based on {src}, ...'\n"
-            citation_examples += "\n❌ INCORRECT (missing citation):\n"
-            citation_examples += "- 'The target HbA1c is 7.5%.' ❌\n"
-            citation_examples += "✅ CORRECT (with citation):\n"
-            if unique_sources:
-                citation_examples += f"- 'According to {unique_sources[0]}, the target HbA1c is 7.5%.' ✅\n"
-        
+        unique_sources = list(set([s.strip() for s in source_matches if s.strip()]))[:5]
+        source_list = ", ".join(unique_sources) if unique_sources else "sources above"
         parts.append(
-            f"\n📚 Evidence-Based Medical Knowledge (with mandatory citations):\n{rag_context}\n"
-            "\n⚠️⚠️⚠️ CRITICAL: MANDATORY CITATION REQUIREMENT ⚠️⚠️⚠️"
-            "\n\nYou MUST include source citations in your response. This is NOT optional."
-            f"{source_list}"
-            "\n\nSTRICT RULES:"
-            "\n1. If you use ANY information from the RAG context above, you MUST cite the source"
-            "\n2. Use the EXACT source name from the list above (copy it exactly)"
-            "\n3. Citations must appear in the SAME sentence where you use the information"
-            "\n4. Do NOT put citations only at the end - integrate them naturally"
-            f"{citation_examples}"
-            "\n\nREQUIRED Citation Format (use these exact patterns with actual source names):"
-            "\n- 'According to [EXACT Source Name from list], ...'"
-            "\n- 'Based on [EXACT Source Name from list], ...'"
-            "\n- 'Per [EXACT Source Name from list], ...'"
-            "\n- 'The [EXACT Source Name from list] states/recommends that...'"
-            "\n\n❌ FORBIDDEN: Using RAG information without citing the EXACT source name"
-            "\n✅ REQUIRED: Every sentence using RAG information must include the source name"
-            "\n✅ REQUIRED: Copy source names EXACTLY as shown in the list above"
+            f"\n📚 {rag_context}\n"
+            "\n**Citation rule:** When using information from above, cite the source in the same sentence. "
+            f"Use exact names: {source_list}. Example: 'According to [Source], ...'"
         )
     
     # Add agent output
@@ -265,86 +232,76 @@ def _get_recent_event_correlations(enhanced_context: EnhancedPatientContext, lim
     # Create glucose lookup (dict for O(1) access)
     glucose_by_time = {}
     for reading in enhanced_context.recent_glucose_readings:
-        try:
-            dt = datetime.fromisoformat(reading.timestamp.replace(UTC_Z_SUFFIX, UTC_OFFSET_SUFFIX))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=tz.utc)
+        dt = parse_iso_to_utc_datetime(reading.timestamp)
+        if dt is not None:
             glucose_by_time[dt] = reading.reading
-        except Exception:
-            continue
 
     if not glucose_by_time:
         return ""
 
     # Analyze each recent meal
     for meal in recent_meals:
-        try:
-            meal_dt = datetime.fromisoformat(meal.timestamp.replace(UTC_Z_SUFFIX, UTC_OFFSET_SUFFIX))
-            if meal_dt.tzinfo is None:
-                meal_dt = meal_dt.replace(tzinfo=tz.utc)
-
-            meal_time_str = format_singapore_datetime(meal_dt, "%b %d at %I:%M %p")
-
-            # Find baseline glucose (before or at meal time)
-            baseline = None
-            for dt in sorted(glucose_by_time.keys()):
-                if dt <= meal_dt:
-                    baseline = glucose_by_time[dt]
-                else:
-                    break
-
-            # Find post-meal glucose (1-3 hours after)
-            meal_end = meal_dt + timedelta(hours=3)
-            post_meal_readings = [
-                (dt, glucose) for dt, glucose in glucose_by_time.items()
-                if meal_dt < dt <= meal_end
-            ]
-
-            if baseline and post_meal_readings:
-                max_glucose = max(g for _, g in post_meal_readings)
-                max_time = next(dt for dt, g in post_meal_readings if g == max_glucose)
-                max_time_str = format_singapore_datetime(max_time, "%I:%M %p")
-                spike = max_glucose - baseline
-
-                # Add correlation
-                impact = "high" if spike > 40 else "moderate" if spike > 20 else "low"
-                correlations.append(
-                    f"- {meal.meal} ({meal_time_str}): {baseline:.0f}→{max_glucose:.0f} mg/dL at {max_time_str} "
-                    f"(+{spike:.0f} spike, {impact} impact)"
-                )
-        except Exception:
+        meal_dt = parse_iso_to_utc_datetime(meal.timestamp)
+        if meal_dt is None:
             continue
+
+        meal_time_str = format_singapore_datetime(meal_dt, "%b %d at %I:%M %p")
+
+        # Find baseline glucose (before or at meal time)
+        baseline = None
+        for dt in sorted(glucose_by_time.keys()):
+            if dt <= meal_dt:
+                baseline = glucose_by_time[dt]
+            else:
+                break
+
+        # Find post-meal glucose (1-3 hours after)
+        meal_end = meal_dt + timedelta(hours=3)
+        post_meal_readings = [
+            (dt, glucose) for dt, glucose in glucose_by_time.items()
+            if meal_dt < dt <= meal_end
+        ]
+
+        if baseline is not None and post_meal_readings:
+            max_glucose = max(g for _, g in post_meal_readings)
+            max_time = next(dt for dt, g in post_meal_readings if g == max_glucose)
+            max_time_str = format_singapore_datetime(max_time, "%I:%M %p")
+            spike = max_glucose - baseline
+
+            # Add correlation
+            impact = "high" if spike > 40 else "moderate" if spike > 20 else "low"
+            correlations.append(
+                f"- {meal.meal} ({meal_time_str}): {baseline:.0f}→{max_glucose:.0f} mg/dL at {max_time_str} "
+                f"(+{spike:.0f} spike, {impact} impact)"
+            )
 
     # Analyze recent activity impacts (last 3 for performance)
     recent_activities = enhanced_context.recent_activity_logs[:3]
     for activity in recent_activities:
-        try:
-            activity_dt = datetime.fromisoformat(activity.timestamp.replace(UTC_Z_SUFFIX, UTC_OFFSET_SUFFIX))
-            if activity_dt.tzinfo is None:
-                activity_dt = activity_dt.replace(tzinfo=tz.utc)
-
-            activity_time_str = format_singapore_datetime(activity_dt, "%b %d at %I:%M %p")
-
-            # Find glucose before (within 1 hour before)
-            before_window = activity_dt - timedelta(hours=1)
-            before_readings = [g for dt, g in glucose_by_time.items() if before_window <= dt < activity_dt]
-
-            # Find glucose after (1-3 hours after)
-            after_window_start = activity_dt + timedelta(hours=1)
-            after_window_end = activity_dt + timedelta(hours=3)
-            after_readings = [g for dt, g in glucose_by_time.items() if after_window_start <= dt <= after_window_end]
-
-            if before_readings and after_readings:
-                avg_before = sum(before_readings) / len(before_readings)
-                avg_after = sum(after_readings) / len(after_readings)
-                change = avg_after - avg_before
-
-                direction = "reduced" if change < 0 else "increased"
-                correlations.append(
-                    f"- {activity.activity_type} ({activity_time_str}): {direction} glucose by {abs(change):.0f} mg/dL"
-                )
-        except Exception:
+        activity_dt = parse_iso_to_utc_datetime(activity.timestamp)
+        if activity_dt is None:
             continue
+
+        activity_time_str = format_singapore_datetime(activity_dt, "%b %d at %I:%M %p")
+
+        # Find glucose before (within 1 hour before)
+        before_window = activity_dt - timedelta(hours=1)
+        before_readings = [g for dt, g in glucose_by_time.items() if before_window <= dt < activity_dt]
+
+        # Find glucose after (1-3 hours after)
+        after_window_start = activity_dt + timedelta(hours=1)
+        after_window_end = activity_dt + timedelta(hours=3)
+        after_readings = [g for dt, g in glucose_by_time.items() if after_window_start <= dt <= after_window_end]
+
+        if before_readings and after_readings:
+            avg_before = sum(before_readings) / len(before_readings)
+            avg_after = sum(after_readings) / len(after_readings)
+            change = avg_after - avg_before
+
+            direction = "reduced" if change < 0 else "increased"
+            correlations.append(
+                f"- {activity.activity_type} ({activity_time_str}): {direction} glucose by {abs(change):.0f} mg/dL"
+            )
 
     if correlations:
         return "Recent Event Impacts (Individual):\n" + "\n".join(correlations[:8])  # Max 8 events
@@ -387,15 +344,11 @@ def _get_trend_alerts(enhanced_context: EnhancedPatientContext) -> str:
 
         today_meds = []
         for med in enhanced_context.recent_medication_logs:
-            try:
-                dt = datetime.fromisoformat(med.timestamp.replace(UTC_Z_SUFFIX, UTC_OFFSET_SUFFIX))
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=tz.utc)
+            dt = parse_iso_to_utc_datetime(med.timestamp)
+            if dt is not None:
                 dt_sg = dt.astimezone(get_singapore_now().tzinfo)
                 if dt_sg >= today_start:
                     today_meds.append(med.medication_name)
-            except Exception:
-                continue
 
         # Check if expected medications are logged today
         expected_meds = set(enhanced_context.patient.medications)
@@ -429,15 +382,11 @@ def _get_trend_alerts(enhanced_context: EnhancedPatientContext) -> str:
             two_days_ago = now - timedelta(days=2)
 
             recent_activities = []
+            two_days_ago_utc = two_days_ago.astimezone(tz.utc)
             for activity in enhanced_context.recent_activity_logs:
-                try:
-                    dt = datetime.fromisoformat(activity.timestamp.replace(UTC_Z_SUFFIX, UTC_OFFSET_SUFFIX))
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=tz.utc)
-                    if dt >= two_days_ago.astimezone(tz.utc):
-                        recent_activities.append(activity)
-                except Exception:
-                    continue
+                dt = parse_iso_to_utc_datetime(activity.timestamp)
+                if dt is not None and dt >= two_days_ago_utc:
+                    recent_activities.append(activity)
 
             if not recent_activities:
                 alerts.append(

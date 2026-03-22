@@ -20,11 +20,10 @@ logger = logging.getLogger(__name__)
 # IMPORTANT: Each agent MUST use ONLY their assigned namespace:
 # - Clinical Safety Agent → NAMESPACE_CLINICAL_SAFETY (via query_clinical_safety())
 # - Cultural Dietitian Agent → NAMESPACE_CULTURAL_DIET (via query_cultural_diet())
-# - Lifestyle Analyst Agent → NAMESPACE_LIFESTYLE_PATTERNS (via query_lifestyle_patterns())
 # Cross-namespace queries are NOT allowed for strict isolation.
+# Note: Lifestyle Analyst Agent does not use RAG; it uses data analysis only.
 NAMESPACE_CLINICAL_SAFETY = "clinical_safety"
 NAMESPACE_CULTURAL_DIET = "dietician_docs"
-NAMESPACE_LIFESTYLE_PATTERNS = "lifestyle-patterns"
 
 
 class RAGService:
@@ -134,7 +133,7 @@ class RAGService:
             query: Search query text
             index_type: Filter by knowledge type (e.g., 'drug', 'food', 'clinical')
             top_k: Number of results to return
-            namespace: REQUIRED - Specific namespace to search (clinical_safety, dietician_docs, lifestyle-patterns)
+            namespace: REQUIRED - Specific namespace to search (clinical_safety, dietician_docs)
             
         Returns:
             List of search results with content, score, and metadata
@@ -144,7 +143,7 @@ class RAGService:
             return []
         
         # Validate namespace is one of the allowed namespaces
-        allowed_namespaces = [NAMESPACE_CLINICAL_SAFETY, NAMESPACE_CULTURAL_DIET, NAMESPACE_LIFESTYLE_PATTERNS]
+        allowed_namespaces = [NAMESPACE_CLINICAL_SAFETY, NAMESPACE_CULTURAL_DIET]
         if namespace and namespace not in allowed_namespaces:
             logger.error(f"[RAG] Invalid namespace '{namespace}' - must be one of {allowed_namespaces}")
             return []
@@ -152,7 +151,7 @@ class RAGService:
         # Require namespace parameter for strict isolation
         if not namespace:
             logger.error("[RAG] search() called without namespace - NAMESPACE ISOLATION VIOLATION!")
-            logger.error("[RAG] Use namespace-specific query methods: query_clinical_safety(), query_cultural_diet(), query_lifestyle_patterns()")
+            logger.error("[RAG] Use namespace-specific query methods: query_clinical_safety(), query_cultural_diet()")
             return []
         
         logger.info(f"[RAG] Search called: namespace='{namespace}' (ISOLATED), query='{query[:80]}...', top_k={top_k}")
@@ -228,7 +227,7 @@ class RAGService:
         
         Args:
             query: Search query
-            namespace: REQUIRED - Specific namespace to search (clinical_safety, dietician_docs, lifestyle-patterns)
+            namespace: REQUIRED - Specific namespace to search (clinical_safety, dietician_docs)
                       MUST be provided - no default to prevent cross-namespace queries
             top_k: Number of results to return
             include_citations: Whether to include source citations (defaults to True - citations are mandatory)
@@ -248,7 +247,7 @@ class RAGService:
             return ""
         
         # Validate namespace is one of the allowed namespaces
-        allowed_namespaces = [NAMESPACE_CLINICAL_SAFETY, NAMESPACE_CULTURAL_DIET, NAMESPACE_LIFESTYLE_PATTERNS]
+        allowed_namespaces = [NAMESPACE_CLINICAL_SAFETY, NAMESPACE_CULTURAL_DIET]
         if namespace not in allowed_namespaces:
             logger.error(f"[RAG] Invalid namespace '{namespace}' - must be one of {allowed_namespaces}")
             return ""
@@ -265,63 +264,23 @@ class RAGService:
             logger.warning(f"[RAG] No results found in namespace '{namespace}' for query: '{query[:80]}...'")
             return ""
         
-        # Citations are MANDATORY when RAG is used - always include them (ignore include_citations parameter)
-        context_parts = ["Relevant Medical Knowledge (with mandatory citations):"]
-        source_names = []  # Collect all source names for citation examples
+        # Format RAG content with source headers. Citation rules are added once in system_prompt_builder.
+        context_parts = ["Evidence-Based Knowledge:"]
         for idx, result in enumerate(results, 1):
             content = result['content']
-            # Extract source information - citations are ALWAYS included
             source = result.get('metadata', {}).get('source', 'Unknown')
             tags = result.get('metadata', {}).get('tags', [])
-            
-            # Format citation prominently at the START for better visibility
-            if source != 'Unknown':
-                # Clean source name for better readability (remove file extensions, underscores)
-                clean_source = source.replace('_', ' ').replace('.pdf', '').replace('.txt', '')
-                citation_header = f"Source: {clean_source}"
-                source_names.append(clean_source)  # Track for examples
-            else:
-                citation_header = "Source: Unknown"
-            
-            if tags:
-                citation_header += f" | Tags: {', '.join(tags[:3])}"
-            
-            # Format: Citation FIRST, then content - makes citations more prominent
-            # Include explicit citation template in the content itself
-            context_parts.append(
-                f"[{idx}] 📖 {citation_header}\n"
-                f"Content: {content}\n"
-                f"When using this information, you MUST cite it as: 'According to {clean_source if source != 'Unknown' else 'the source'}, ...'"
+            clean_source = (
+                source.replace('_', ' ').replace('.pdf', '').replace('.txt', '')
+                if source != 'Unknown' else 'Unknown'
             )
+            header = f"Source: {clean_source}"
+            if tags:
+                header += f" | Tags: {', '.join(tags[:3])}"
+            context_parts.append(f"[{idx}] {header}\nContent: {content}")
         
-        # Add explicit instruction about citations with actual source names from results
-        citation_examples = ""
-        if source_names:
-            unique_sources = list(set(source_names))[:3]  # Get unique sources, max 3
-            citation_examples = "\n\nACTUAL Source Names from above (use these EXACT names):\n"
-            for src in unique_sources:
-                citation_examples += f"- {src}\n"
-            citation_examples += "\nExample citations using ACTUAL sources:\n"
-            for src in unique_sources[:2]:  # Show 2 examples
-                citation_examples += f"- 'According to {src}, ...'\n"
-        
-        context_parts.append(
-            "\n⚠️⚠️⚠️ MANDATORY CITATION REQUIREMENT ⚠️⚠️⚠️"
-            "\nYou MUST cite the source for EVERY piece of information you use from above."
-            f"{citation_examples}"
-            "\n\nREQUIRED Citation Format (use the EXACT source names shown above):"
-            "\n- 'According to [EXACT Source Name], ...'"
-            "\n- 'Based on [EXACT Source Name], ...'"
-            "\n- 'Per [EXACT Source Name], ...'"
-            "\n- 'The [EXACT Source Name] states that...'"
-            "\n\n❌ FORBIDDEN: Never mention information from RAG without citing the EXACT source name"
-            "\n✅ REQUIRED: Every sentence using RAG information must include the source name"
-            "\n✅ REQUIRED: Copy the source name EXACTLY as shown above (do not modify it)"
-        )
-        
-        context_str = "\n".join(context_parts)
-        logger.info(f"[RAG] Formatted context string with MANDATORY citations: {len(context_str)} characters from {len(results)} results")
-        logger.info(f"[RAG] Citations included for all {len(results)} results - citations are mandatory when RAG is used")
+        context_str = "\n\n".join(context_parts)
+        logger.info(f"[RAG] Formatted context: {len(context_str)} chars from {len(results)} results")
         return context_str
     
     # Namespace-specific query methods for agent isolation
@@ -410,54 +369,7 @@ class RAGService:
             logger.warning(f"[RAG] No nutritional data found in RAG for dish: '{dish_name}'")
         
         return results
-    
-    def query_lifestyle_patterns(
-        self,
-        query: str,
-        patient_context: Optional[Dict[str, Any]] = None,
-        top_k: int = 3,
-    ) -> List[Dict[str, Any]]:
-        """Query lifestyle patterns namespace for exercise, glucose targets, etc.
-        
-        IMPORTANT: This method ONLY queries the 'lifestyle-patterns' namespace.
-        Use this method for Lifestyle Analyst Agent queries.
-        
-        Args:
-            query: Search query (e.g., "glucose target Type 2 Diabetes age 45")
-            patient_context: Optional patient context to enhance query
-            top_k: Number of results
-            
-        Returns:
-            List of relevant lifestyle guidance documents from lifestyle-patterns namespace only
-        """
-        if not self.is_available():
-            logger.warning(f"[RAG] Lifestyle Patterns query skipped - RAG service not available")
-            return []
-        
-        logger.info(f"[RAG] Lifestyle Patterns query initiated: '{query[:100]}...' (top_k={top_k})")
-        logger.info(f"[RAG] NAMESPACE ISOLATION: Querying ONLY '{NAMESPACE_LIFESTYLE_PATTERNS}' namespace")
-        
-        # Enhance query with patient context
-        enhanced_query = query
-        if patient_context:
-            context_parts = [query]
-            if patient_context.get('age'):
-                context_parts.append(f"age {patient_context['age']}")
-            if patient_context.get('ethnicity'):
-                context_parts.append(f"ethnicity {patient_context['ethnicity']}")
-            if patient_context.get('conditions'):
-                context_parts.append(f"conditions {', '.join(patient_context['conditions'])}")
-            enhanced_query = " ".join(context_parts)
-            logger.debug(f"[RAG] Enhanced query with patient context: '{enhanced_query[:150]}...'")
-        
-        # STRICT NAMESPACE ISOLATION: Only query lifestyle-patterns namespace
-        results = self.search(enhanced_query, namespace=NAMESPACE_LIFESTYLE_PATTERNS, top_k=top_k)
-        logger.info(f"[RAG] Lifestyle Patterns query returned {len(results)} results from namespace '{NAMESPACE_LIFESTYLE_PATTERNS}' ONLY")
-        if results:
-            logger.debug(f"[RAG] Top result source: {results[0].get('metadata', {}).get('source', 'Unknown')}")
-        
-        return results
-    
+
     def ingest_with_metadata(
         self,
         documents: List[Dict[str, Any]],
@@ -468,7 +380,7 @@ class RAGService:
         
         Args:
             documents: List of document dicts with keys: content, metadata (source, tags, etc.)
-            namespace: Target namespace (clinical_safety, dietician_docs, lifestyle-patterns)
+            namespace: Target namespace (clinical_safety, dietician_docs)
             batch_size: Batch size for upsert (max 96 for text)
         """
         if not self.is_available():

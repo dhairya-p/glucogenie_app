@@ -2,14 +2,10 @@ from __future__ import annotations
 
 import logging
 import re
-import os
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_core.runnables import RunnableLambda
-from langchain_openai import ChatOpenAI
-from supabase import Client, create_client
+from supabase import Client
 
 # Load .env file if python-dotenv is available
 try:
@@ -41,6 +37,7 @@ from app.core.timezone_utils import (
     get_singapore_timezone,
     get_today_start_singapore,
     format_singapore_datetime,
+    parse_iso_to_utc_datetime,
 )
 from app.core.system_prompt_builder import build_system_prompt
 from app.core.context_summarizer import summarize_enhanced_context
@@ -58,6 +55,51 @@ DEFAULT_UNMATCHED_RESPONSE = (
     "diabetes management. Please ask me about your diabetes care, medications, glucose readings, "
     "meals, or activity patterns."
 )
+
+
+def _fetch_basic_patient_context(supabase: Client, user_id: str) -> PatientContext:
+    """Fetch profile, conditions, and medications from Supabase. Shared by _extract_enhanced_patient_context and _extract_patient_context."""
+    profile_resp = (
+        supabase.table("profiles")
+        .select("first_name, last_name, age, sex, ethnicity, height, activity_level, location")
+        .eq("id", user_id)
+        .execute()
+        .data
+    )
+    profile = profile_resp[0] if profile_resp else {}
+
+    conditions_resp = (
+        supabase.table("conditions")
+        .select("condition_name")
+        .eq("user_id", user_id)
+        .execute()
+        .data
+        or []
+    )
+    conditions = [c.get("condition_name") for c in conditions_resp if c.get("condition_name")]
+
+    meds_resp = (
+        supabase.table("medications")
+        .select("medication_name")
+        .eq("user_id", user_id)
+        .execute()
+        .data
+        or []
+    )
+    medications = [m.get("medication_name") for m in meds_resp if m.get("medication_name")]
+
+    return PatientContext(
+        first_name=profile.get("first_name"),
+        last_name=profile.get("last_name"),
+        age=profile.get("age", 30),
+        sex=profile.get("sex"),
+        ethnicity=profile.get("ethnicity", "Unknown"),
+        height=profile.get("height"),
+        activity_level=profile.get("activity_level"),
+        location=profile.get("location"),
+        conditions=conditions,
+        medications=medications,
+    )
 
 
 def _extract_enhanced_patient_context(user_id: str, days: int = 7) -> EnhancedPatientContext:
@@ -81,52 +123,10 @@ def _extract_enhanced_patient_context(user_id: str, days: int = 7) -> EnhancedPa
     since = now - timedelta(days=days, minutes=1)
     # Convert to UTC for Supabase query (Supabase stores timestamps in UTC)
     since_utc = since.astimezone(tz.utc) if since.tzinfo else since.replace(tzinfo=get_singapore_timezone()).astimezone(tz.utc)
-    since_iso = since_utc.isoformat()
-    
-    
-    # 1. Fetch basic patient context
-    profile_resp = (
-        supabase.table("profiles")
-        .select("first_name, last_name, age, sex, ethnicity, height, activity_level, location")
-        .eq("id", user_id)
-        .execute()
-        .data
-    )
-    profile = profile_resp[0] if profile_resp else {}
-    
-    conditions_resp = (
-        supabase.table("conditions")
-        .select("condition_name")
-        .eq("user_id", user_id)
-        .execute()
-        .data
-        or []
-    )
-    conditions = [c.get("condition_name") for c in conditions_resp if c.get("condition_name")]
-    
-    meds_resp = (
-        supabase.table("medications")
-        .select("medication_name")
-        .eq("user_id", user_id)
-        .execute()
-        .data
-        or []
-    )
-    medications = [m.get("medication_name") for m in meds_resp if m.get("medication_name")]
-    
-    patient = PatientContext(
-        first_name=profile.get("first_name"),
-        last_name=profile.get("last_name"),
-        age=profile.get("age", 30),
-        sex=profile.get("sex"),
-        ethnicity=profile.get("ethnicity", "Unknown"),
-        height=profile.get("height"),
-        activity_level=profile.get("activity_level"),
-        location=profile.get("location"),
-        conditions=conditions,
-        medications=medications,
-    )
-    
+
+    # 1. Fetch basic patient context (shared with _extract_patient_context)
+    patient = _fetch_basic_patient_context(supabase, user_id)
+
     # 2. Fetch recent glucose readings
     glucose_readings = []
     try:
@@ -146,22 +146,12 @@ def _extract_enhanced_patient_context(user_id: str, days: int = 7) -> EnhancedPa
         # Filter by time in Python to ensure timezone-aware comparison
         filtered_rows = []
         for row in glucose_rows:
-            try:
-                row_created_at = row.get("created_at")
-                if row_created_at:
-                    # Parse the timestamp (Supabase returns ISO format, may have Z suffix)
-                    row_created_at_str = str(row_created_at).replace('Z', '+00:00')
-                    row_dt = datetime.fromisoformat(row_created_at_str)
-                    if row_dt.tzinfo is None:
-                        row_dt = row_dt.replace(tzinfo=tz.utc)
-                    # Compare with our since time (both in UTC)
-                    if row_dt >= since_utc:
-                        filtered_rows.append(row)
-                else:
-                    # If no created_at, include it (shouldn't happen but be safe)
+            row_created_at = row.get("created_at")
+            if row_created_at:
+                row_dt = parse_iso_to_utc_datetime(row_created_at)
+                if row_dt is not None and row_dt >= since_utc:
                     filtered_rows.append(row)
-            except Exception:
-                # If parsing fails, include the row anyway (better to include than exclude)
+            else:
                 filtered_rows.append(row)
         
         glucose_readings = [
@@ -193,18 +183,12 @@ def _extract_enhanced_patient_context(user_id: str, days: int = 7) -> EnhancedPa
         # Filter by time in Python
         filtered_meal_rows = []
         for row in meal_rows:
-            try:
-                row_created_at = row.get("created_at")
-                if row_created_at:
-                    row_created_at_str = str(row_created_at).replace('Z', '+00:00')
-                    row_dt = datetime.fromisoformat(row_created_at_str)
-                    if row_dt.tzinfo is None:
-                        row_dt = row_dt.replace(tzinfo=tz.utc)
-                    if row_dt >= since_utc:
-                        filtered_meal_rows.append(row)
-                else:
+            row_created_at = row.get("created_at")
+            if row_created_at:
+                row_dt = parse_iso_to_utc_datetime(row_created_at)
+                if row_dt is not None and row_dt >= since_utc:
                     filtered_meal_rows.append(row)
-            except Exception:
+            else:
                 filtered_meal_rows.append(row)
         
         meal_rows = filtered_meal_rows
@@ -236,18 +220,12 @@ def _extract_enhanced_patient_context(user_id: str, days: int = 7) -> EnhancedPa
         # Filter by time in Python
         filtered_med_rows = []
         for row in med_log_rows:
-            try:
-                row_created_at = row.get("created_at")
-                if row_created_at:
-                    row_created_at_str = str(row_created_at).replace('Z', '+00:00')
-                    row_dt = datetime.fromisoformat(row_created_at_str)
-                    if row_dt.tzinfo is None:
-                        row_dt = row_dt.replace(tzinfo=tz.utc)
-                    if row_dt >= since_utc:
-                        filtered_med_rows.append(row)
-                else:
+            row_created_at = row.get("created_at")
+            if row_created_at:
+                row_dt = parse_iso_to_utc_datetime(row_created_at)
+                if row_dt is not None and row_dt >= since_utc:
                     filtered_med_rows.append(row)
-            except Exception:
+            else:
                 filtered_med_rows.append(row)
         
         med_log_rows = filtered_med_rows
@@ -280,18 +258,12 @@ def _extract_enhanced_patient_context(user_id: str, days: int = 7) -> EnhancedPa
         # Filter by time in Python
         filtered_activity_rows = []
         for row in activity_rows:
-            try:
-                row_created_at = row.get("created_at")
-                if row_created_at:
-                    row_created_at_str = str(row_created_at).replace('Z', '+00:00')
-                    row_dt = datetime.fromisoformat(row_created_at_str)
-                    if row_dt.tzinfo is None:
-                        row_dt = row_dt.replace(tzinfo=tz.utc)
-                    if row_dt >= since_utc:
-                        filtered_activity_rows.append(row)
-                else:
+            row_created_at = row.get("created_at")
+            if row_created_at:
+                row_dt = parse_iso_to_utc_datetime(row_created_at)
+                if row_dt is not None and row_dt >= since_utc:
                     filtered_activity_rows.append(row)
-            except Exception:
+            else:
                 filtered_activity_rows.append(row)
         
         activity_rows = filtered_activity_rows
@@ -324,18 +296,12 @@ def _extract_enhanced_patient_context(user_id: str, days: int = 7) -> EnhancedPa
         # Filter by time in Python
         filtered_weight_rows = []
         for row in weight_rows:
-            try:
-                row_created_at = row.get("created_at")
-                if row_created_at:
-                    row_created_at_str = str(row_created_at).replace('Z', '+00:00')
-                    row_dt = datetime.fromisoformat(row_created_at_str)
-                    if row_dt.tzinfo is None:
-                        row_dt = row_dt.replace(tzinfo=tz.utc)
-                    if row_dt >= since_utc:
-                        filtered_weight_rows.append(row)
-                else:
+            row_created_at = row.get("created_at")
+            if row_created_at:
+                row_dt = parse_iso_to_utc_datetime(row_created_at)
+                if row_dt is not None and row_dt >= since_utc:
                     filtered_weight_rows.append(row)
-            except Exception:
+            else:
                 filtered_weight_rows.append(row)
         
         weight_rows = filtered_weight_rows
@@ -430,61 +396,9 @@ def _extract_enhanced_patient_context(user_id: str, days: int = 7) -> EnhancedPa
 
 
 def _extract_patient_context(user_id: str) -> PatientContext:
-    """Fetch patient context from Supabase for a given user_id."""
+    """Fetch patient context from Supabase for a given user_id. Uses shared _fetch_basic_patient_context."""
     supabase = get_supabase_client()
-
-    # Fetch profile with all relevant fields
-    profile_resp = (
-        supabase.table("profiles")
-        .select("first_name, last_name, age, sex, ethnicity, height, activity_level, location")
-        .eq("id", user_id)
-        .execute()
-        .data
-    )
-    profile = profile_resp[0] if profile_resp else {}
-    first_name = profile.get("first_name")
-    last_name = profile.get("last_name")
-    age = profile.get("age", 30)
-    sex = profile.get("sex")
-    ethnicity = profile.get("ethnicity", "Unknown")
-    height = profile.get("height")
-    activity_level = profile.get("activity_level")
-    location = profile.get("location")
-
-    # Fetch conditions
-    conditions_resp = (
-        supabase.table("conditions")
-        .select("condition_name")
-        .eq("user_id", user_id)
-        .execute()
-        .data
-        or []
-    )
-    conditions = [c.get("condition_name") for c in conditions_resp if c.get("condition_name")]
-
-    # Fetch medications
-    meds_resp = (
-        supabase.table("medications")
-        .select("medication_name")
-        .eq("user_id", user_id)
-        .execute()
-        .data
-        or []
-    )
-    medications = [m.get("medication_name") for m in meds_resp if m.get("medication_name")]
-
-    return PatientContext(
-        first_name=first_name,
-        last_name=last_name,
-        age=age,
-        sex=sex,
-        ethnicity=ethnicity,
-        height=height,
-        activity_level=activity_level,
-        location=location,
-        conditions=conditions,
-        medications=medications,
-    )
+    return _fetch_basic_patient_context(supabase, user_id)
 
 
 def _route_and_process(input_data: dict[str, Any]) -> dict[str, Any]:
@@ -620,153 +534,4 @@ def _route_and_process(input_data: dict[str, Any]) -> dict[str, Any]:
         "rag_sources": rag_sources,
     }  # Return RAG context for system prompt
 
-
-def get_chat_runnable() -> Any:
-    """Create and return a LangChain Runnable that processes chat messages.
-
-    This runnable:
-    1. Accepts messages + user_id
-    2. Routes to the appropriate agent (Router -> Specialist Agent)
-    3. Returns structured output that can be streamed via astream_events
-    """
-
-    # Initialize LLM for streaming responses
-    # Get OpenAI API key from environment
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    if not openai_api_key:
-        raise RuntimeError(
-            "OPENAI_API_KEY not found in environment variables. "
-            "Please set it in your .env file."
-        )
-
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0.7,
-        streaming=True,
-        api_key=openai_api_key,
-    )
-
-    def prepare_messages(input_dict: dict[str, Any]) -> list:
-        """Prepare messages with agent context and return as list for LLM."""
-        messages = input_dict.get("messages", [])
-        user_id = input_dict.get("user_id", "")
-
-        # Convert messages to LangChain format
-        lc_messages = []
-        for msg in messages:
-            role = msg.get("role", "user") if isinstance(msg, dict) else "user"
-            content = msg.get("content", str(msg)) if isinstance(msg, dict) else str(msg)
-
-            if role == "system":
-                lc_messages.append(SystemMessage(content=content))
-            elif role == "assistant":
-                lc_messages.append(AIMessage(content=content))
-            else:
-                lc_messages.append(HumanMessage(content=content))
-
-        # Get agent output (this runs synchronously but quickly)
-        # This will fetch enhanced context ONCE and share it
-        rag_context = ""  # Initialize RAG context
-        try:
-            # Use a longer lookback (e.g. 30 days) for chatbot context summary
-            agent_output = _route_and_process({"messages": messages, "user_id": user_id, "days": 30})
-            agent_text = agent_output.get("output", "")
-            enhanced_context = agent_output.get("enhanced_context")  # Get enhanced context from route_and_process
-            rag_context = agent_output.get("rag_context", "")  # Get RAG context from route_and_process
-            if rag_context:
-                source_count = rag_context.count("Source:")
-                logger.info(
-                    "RAG context attached: %d chars, %d source markers",
-                    len(rag_context),
-                    source_count,
-                )
-            else:
-                logger.info("No RAG context attached for this request")
-            
-            # Use enhanced context for system prompt if available
-            if enhanced_context:
-                # Prefer the longer-horizon summary if it was computed
-                if getattr(enhanced_context, "historical_summary", None):
-                    patient_context_str = enhanced_context.historical_summary or ""
-                else:
-                    patient_context_str = enhanced_context.get_summary_string()
-            else:
-                # Fallback to basic patient context
-                try:
-                    patient = _extract_patient_context(user_id)
-                    context_parts = []
-                    if patient.full_name and patient.full_name != "there":
-                        context_parts.append(f"Name: {patient.full_name}")
-                    if patient.age:
-                        context_parts.append(f"Age: {patient.age}")
-                    if patient.sex:
-                        context_parts.append(f"Sex: {patient.sex}")
-                    if patient.ethnicity and patient.ethnicity != "Unknown":
-                        context_parts.append(f"Ethnicity: {patient.ethnicity}")
-                    if patient.height:
-                        context_parts.append(f"Height: {patient.height} cm")
-                    if patient.activity_level:
-                        context_parts.append(f"Activity Level: {patient.activity_level}")
-                    if patient.location:
-                        context_parts.append(f"Location: {patient.location}")
-                    if patient.conditions:
-                        context_parts.append(f"Medical Conditions: {', '.join(patient.conditions)}")
-                    if patient.medications:
-                        context_parts.append(f"Medications: {', '.join(patient.medications)}")
-                    
-                    if context_parts:
-                        patient_context_str = "\n".join(context_parts)
-                    else:
-                        patient_context_str = ""
-                except Exception as exc:
-                    logger.error("Error fetching patient context for system prompt: %s", exc)
-                    patient_context_str = ""
-
-            # Extract user message for system prompt builder
-            user_message = ""
-            if messages:
-                last_msg = messages[-1]
-                user_message = last_msg.get("content", "") if isinstance(last_msg, dict) else str(last_msg)
-            
-            # RAG context is already extracted from agent_output on line 596
-            # Each agent queries ONLY its assigned namespace and returns the context
-            # No mixing of namespaces - each agent's rag_context is from its namespace only
-            
-            # Build system prompt using shared utility (with RAG context from agent)
-            system_prompt = build_system_prompt(
-                patient_context_str=patient_context_str or "",
-                enhanced_context=enhanced_context,
-                user_message=user_message,
-                agent_text=agent_text,
-                rag_context=rag_context,  # From agent_output - namespace-isolated by agent
-            )
-            lc_messages.insert(0, SystemMessage(content=system_prompt))
-        except Exception as exc:
-            logger.error("Error in agent routing: %s", exc)
-            # Fallback system prompt with patient context
-            user_message = ""
-            if messages:
-                last_msg = messages[-1]
-                user_message = last_msg.get("content", "") if isinstance(last_msg, dict) else str(last_msg)
-            
-            fallback_prompt = build_system_prompt(
-                patient_context_str=patient_context_str or "",
-                enhanced_context=None,
-                user_message=user_message,
-                agent_text=None,
-                rag_context="",
-            )
-            lc_messages.insert(0, SystemMessage(content=fallback_prompt))
-
-        # Return messages list directly (LLM accepts list of messages)
-        return lc_messages
-
-    # Create a proper chain: prepare messages -> LLM
-    # The LLM will handle streaming via astream_events
-    chain = (
-        RunnableLambda(prepare_messages)
-        | llm
-    )
-    
-    return chain
 

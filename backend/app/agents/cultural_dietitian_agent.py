@@ -14,6 +14,32 @@ from app.services.rag_service import get_rag_service, NAMESPACE_CULTURAL_DIET
 logger = logging.getLogger(__name__)
 
 
+def _is_rag_dish_reliable_match(vision_meal_name: str, rag_dish_name: str) -> bool:
+    """Check if RAG dish is a reliable match for what Vision detected.
+
+    Only use RAG nutritional data when the dish names clearly refer to the same meal.
+    Avoid force-fitting (e.g., Vision says 'Caesar Salad', RAG returns 'Chicken Rice').
+    """
+    if not vision_meal_name or not rag_dish_name:
+        return False
+    v = vision_meal_name.lower().strip()
+    r = rag_dish_name.lower().strip()
+    # Must share significant overlap: either one contains the other, or they share
+    # the primary dish term (e.g., "chicken rice" in both "Hainanese Chicken Rice" and "Chicken Rice")
+    v_words = set(w for w in v.split() if len(w) > 2)
+    r_words = set(w for w in r.split() if len(w) > 2)
+    overlap = v_words & r_words
+    # Require at least 2 meaningful words in common, or one name fully contained in the other
+    if r in v or v in r:
+        return True
+    if len(overlap) >= 2:
+        return True
+    # Single strong match for very specific dishes (e.g., "laksa" in both)
+    if len(overlap) == 1 and len(v_words) <= 3 and len(r_words) <= 3:
+        return True
+    return False
+
+
 class FoodItem(BaseModel):
     name: str
     serving_size: str
@@ -98,21 +124,29 @@ def analyze_food_image(state: CulturalDietitianState) -> dict:
                 logger.info(f"[Cultural Dietitian Agent] Querying RAG for nutritional data: '{analysis.meal_name}'")
                 rag_results = rag.query_cultural_diet(analysis.meal_name, top_k=1)
                 if rag_results:
-                    rag_nutritional_data = rag_results[0]
-                    logger.info(f"[Cultural Dietitian Agent] RAG returned nutritional data for: {analysis.meal_name}")
-                    metadata = rag_nutritional_data.get('metadata', {})
-                    logger.debug(f"[Cultural Dietitian Agent] RAG data - Carbs: {metadata.get('carbs_g', 'N/A')}g, Calories: {metadata.get('calories_kcal', 'N/A')}kcal, Source: {metadata.get('source', 'Unknown')}")
-                    
-                    # Get formatted context for system prompt
-                    rag_context = rag.get_context_for_llm(
-                        analysis.meal_name,
-                        namespace=NAMESPACE_CULTURAL_DIET,
-                        top_k=1,
-                        include_citations=True
-                    )
-                    source = metadata.get('source', 'Unknown')
-                    if source != 'Unknown':
-                        rag_citations.append(source)
+                    candidate = rag_results[0]
+                    meta = candidate.get('metadata', {}) or {}
+                    rag_dish = meta.get('dish_name') or meta.get('title') or ''
+                    if _is_rag_dish_reliable_match(analysis.meal_name, rag_dish):
+                        rag_nutritional_data = candidate
+                        logger.info(f"[Cultural Dietitian Agent] RAG match confirmed: '{analysis.meal_name}' ~ '{rag_dish}' - using RAG nutritional data")
+                        metadata = rag_nutritional_data.get('metadata', {})
+                        logger.debug(f"[Cultural Dietitian Agent] RAG data - Carbs: {metadata.get('carbs_g', 'N/A')}g, Calories: {metadata.get('calories_kcal', 'N/A')}kcal, Source: {metadata.get('source', 'Unknown')}")
+                        rag_context = rag.get_context_for_llm(
+                            analysis.meal_name,
+                            namespace=NAMESPACE_CULTURAL_DIET,
+                            top_k=1,
+                            include_citations=True
+                        )
+                        source = metadata.get('source', 'Unknown')
+                        if source != 'Unknown':
+                            rag_citations.append(source)
+                    else:
+                        logger.info(
+                            "[Cultural Dietitian Agent] RAG dish '%s' does NOT match Vision '%s' - using Vision API estimates only (no force-fitting)",
+                            rag_dish,
+                            analysis.meal_name,
+                        )
                 else:
                     logger.warning(f"[Cultural Dietitian Agent] No RAG data found for: {analysis.meal_name} - using Vision API estimates only")
             except Exception as e:

@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from enum import Enum
 from typing import Literal
 
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -16,13 +15,13 @@ from app.schemas.patient_context import PatientContext
 
 logger = logging.getLogger(__name__)
 
-
-class Intent(str, Enum):
-    """High-level intents that the Router Agent can choose."""
-
-    MEDICAL = "medical"
-    LIFESTYLE = "lifestyle"
-    MEAL_SUGGESTIONS = "meal_suggestions"
+# Single naming scheme for routing - used everywhere
+TARGET_AGENT_LITERAL = Literal[
+    "clinical_safety",
+    "lifestyle_analyst",
+    "cultural_dietitian",
+    "unmatched",
+]
 
 
 class RouterState(BaseModel):
@@ -35,34 +34,28 @@ class RouterState(BaseModel):
 
 
 class RouterDecision(BaseModel):
-    """Structured output from the Router Agent."""
+    """Structured output from the Router Agent. Uses target_agent as the single routing field."""
 
-    intent: Intent
+    target_agent: TARGET_AGENT_LITERAL
     rationale: str
-    target_agent: Literal[
-        "clinical_safety",
-        "lifestyle_analyst",
-        "cultural_dietitian",
-        "unmatched",
-    ]
 
     model_config = ConfigDict(extra="ignore")
 
 
 def _build_routing_prompt(patient: PatientContext) -> str:
-    """Build the system prompt for LLM-based intent classification.
+    """Build the system prompt for LLM-based agent routing.
 
     Args:
         patient: Patient context for personalized routing
 
     Returns:
-        System prompt for intent classification
+        System prompt for target agent classification
     """
-    prompt = """You are an intelligent routing agent for a diabetes management application. Your task is to classify the user's query into one of three intents, and then choose the most appropriate specialist agent.
+    prompt = """You are an intelligent routing agent for a diabetes management application. Your task is to classify the user's query and choose the most appropriate specialist agent.
 
-**Intent Categories:**
+**Target Agents (use EXACTLY these values):**
 
-1. **MEDICAL** (clinical_safety agent):
+1. **clinical_safety**:
    - Medication safety, side effects, drug interactions, contraindications
    - Dosage questions, prescription advice, medication risks
    - Clinical warnings, precautions, adverse reactions
@@ -82,14 +75,14 @@ def _build_routing_prompt(patient: PatientContext) -> str:
      * "What foods or drugs should I avoid?"
      * "What should I be wary/mindful of with my medications?"
 
-2. **LIFESTYLE** (lifestyle_analyst agent):
+2. **lifestyle_analyst**:
    - Glucose tracking, blood sugar trends, readings analysis
    - Meal logging, food intake, carbohydrate tracking, diet patterns
    - Exercise tracking, activity logs, physical activity
    - Weight tracking, BMI, health metrics
    - Medication adherence tracking (did I take my meds, logging history)
    - Recent logs, historical data analysis, patterns, trends
-   - Examples (lifestyle_analyst):
+   - Examples:
      * "What was my average glucose this week?"
      * "Show me my recent meals"
      * "Did I take my medication today?"
@@ -98,7 +91,7 @@ def _build_routing_prompt(patient: PatientContext) -> str:
      * "What medications did I log recently?"
      * "How is my diabetes management?"
 
-3. **MEAL_SUGGESTIONS** (cultural_dietitian agent):
+3. **cultural_dietitian**:
    - Singapore-specific meal suggestions and recommendations
    - Culturally appropriate meals based on ethnicity, location, and diabetes
    - Portion size, serving size, carb portions, and plate balance questions
@@ -111,16 +104,16 @@ def _build_routing_prompt(patient: PatientContext) -> str:
 
 **Classification Rules:**
 
-- **Safety First**: If there's ANY mention of medication safety, side effects, interactions, or dosage changes → MEDICAL
-- **Clinical Guidelines**: Any query about clinical guidelines, recommendations, protocols, standards (MOH, ADA, WHO, medical societies) → MEDICAL
+- **Safety First**: If there's ANY mention of medication safety, side effects, interactions, or dosage changes → clinical_safety
+- **Clinical Guidelines**: Any query about clinical guidelines, recommendations, protocols, standards (MOH, ADA, WHO, medical societies) → clinical_safety
 - **Tracking vs Safety**: Distinguish between:
-  * Medication SAFETY questions (side effects, interactions) → MEDICAL
-  * Medication TRACKING questions (did I take it, when did I take it) → LIFESTYLE
-- **Data Analysis**: Questions about logs, trends, patterns, history, recent data → LIFESTYLE
-- **Avoidance/Safety**: Any question about "avoid", "wary", "mindful", "safe", "interaction" → MEDICAL
-- **General Management**: Broad questions about overall diabetes management without safety/interaction terms → LIFESTYLE
-- **Portion Size**: Any question about portion size, serving size, or carb portions → MEAL_SUGGESTIONS
-- **Recipes/Cooking**: Requests for recipes, cooking instructions, or how-to-cook should be marked as "unmatched"
+  * Medication SAFETY questions (side effects, interactions) → clinical_safety
+  * Medication TRACKING questions (did I take it, when did I take it) → lifestyle_analyst
+- **Data Analysis**: Questions about logs, trends, patterns, history, recent data → lifestyle_analyst
+- **Avoidance/Safety**: Any question about "avoid", "wary", "mindful", "safe", "interaction" → clinical_safety
+- **General Management**: Broad questions about overall diabetes management without safety/interaction terms → lifestyle_analyst
+- **Portion Size**: Any question about portion size, serving size, or carb portions → cultural_dietitian
+- **Recipes/Cooking**: Requests for recipes, cooking instructions, or how-to-cook → unmatched
 
 **Patient Context:**"""
 
@@ -144,15 +137,15 @@ def _build_routing_prompt(patient: PatientContext) -> str:
 
 **Output Format (JSON):**
 {
-    "intent": "medical" | "lifestyle" | "meal_suggestions",
-    "rationale": "Brief explanation of why this intent was chosen (1-2 sentences)",
-    "target_agent": "clinical_safety" | "lifestyle_analyst" | "cultural_dietitian" | "unmatched"
+    "target_agent": "clinical_safety" | "lifestyle_analyst" | "cultural_dietitian" | "unmatched",
+    "rationale": "Brief explanation of why this agent was chosen (1-2 sentences)"
 }
 
 **Important Notes:**
-- If the query does not clearly fit into MEDICAL or LIFESTYLE categories, use "unmatched" as target_agent
-- Only route to clinical_safety, lifestyle_analyst, or cultural_dietitian if the query is clearly related to diabetes management
-- General conversation, greetings, or unrelated queries should be marked as "unmatched"
+- Use EXACTLY one of: clinical_safety, lifestyle_analyst, cultural_dietitian, unmatched
+- If the query does not clearly fit, use target_agent "unmatched"
+- Only route to a specialist if the query is clearly related to diabetes management
+- General conversation, greetings, or unrelated queries → unmatched
 
 **Important:**
 - Respond ONLY with valid JSON, no additional text
@@ -166,30 +159,29 @@ def _build_routing_prompt(patient: PatientContext) -> str:
 
 @tool("route_intent", return_direct=False)
 def route_intent(state: RouterState) -> dict:
-    """Decide whether a query is Medical or Lifestyle using LLM-based classification.
+    """Route user query to the appropriate specialist agent using LLM-based classification.
 
-    This function uses an LLM (GPT-4o-mini) to intelligently classify user queries based on:
-    - Intent analysis of the user's question
+    Uses GPT-4o-mini to classify queries based on:
+    - User question content
     - Patient context (medications, conditions, demographics)
     - Safety-first approach for medication queries
 
-    Intent categories:
-    - MEDICAL: Medication safety, side effects, interactions, dosage questions, clinical guidelines
-    - LIFESTYLE: Glucose tracking, meal logs, activity patterns, adherence tracking
-    - MEAL_SUGGESTIONS: Culturally appropriate meal recommendations and what to eat/cook
-    - UNMATCHED: Queries that don't fit these categories (general conversation, unrelated topics)
+    Target agents:
+    - clinical_safety: Medication safety, side effects, interactions, dosage, clinical guidelines
+    - lifestyle_analyst: Glucose tracking, meal logs, activity patterns, adherence tracking
+    - cultural_dietitian: Singapore-specific meal recommendations, portion sizes
+    - unmatched: General conversation, greetings, or unrelated topics
 
     Returns:
-        RouterDecision with intent, rationale, and target_agent (or "unmatched" if query doesn't fit)
+        Dict with target_agent and rationale
     """
 
     openai_api_key = os.getenv("OPENAI_API_KEY")
     if not openai_api_key:
         logger.error("OPENAI_API_KEY not found; routing to unmatched")
         return RouterDecision(
-            intent=Intent.MEDICAL,
-            rationale="Router unavailable (missing OPENAI_API_KEY).",
             target_agent="unmatched",
+            rationale="Router unavailable (missing OPENAI_API_KEY).",
         ).model_dump()
 
     system_prompt = _build_routing_prompt(state.patient)
@@ -214,15 +206,39 @@ def route_intent(state: RouterState) -> dict:
     if json_start < 0 or json_end <= json_start:
         logger.warning("No JSON found in LLM routing response; routing to unmatched")
         return RouterDecision(
-            intent=Intent.MEDICAL,
-            rationale="Router returned non-JSON output.",
             target_agent="unmatched",
+            rationale="Router returned non-JSON output.",
         ).model_dump()
 
     result_dict = json.loads(response_text[json_start:json_end])
-    if result_dict.get("target_agent") == "chitchat":
-        result_dict["target_agent"] = "unmatched"
-    decision = RouterDecision(**result_dict)
+
+    # Normalize target_agent: map common LLM mistakes to valid values
+    raw_agent = result_dict.get("target_agent") or result_dict.get("intent")
+    if raw_agent:
+        raw_agent = str(raw_agent).strip().lower()
+        # Map old intent-style values to target_agent
+        agent_map = {
+            "medical": "clinical_safety",
+            "lifestyle": "lifestyle_analyst",
+            "meal_suggestions": "cultural_dietitian",
+            "chitchat": "unmatched",
+            "general": "unmatched",
+            "other": "unmatched",
+            "none": "unmatched",
+        }
+        result_dict["target_agent"] = agent_map.get(raw_agent, raw_agent)
+    # Ensure we have target_agent and rationale
+    if "rationale" not in result_dict:
+        result_dict["rationale"] = "No rationale provided."
+
+    try:
+        decision = RouterDecision(**result_dict)
+    except Exception as exc:
+        logger.warning("RouterDecision validation failed: %s; routing to unmatched", exc)
+        return RouterDecision(
+            target_agent="unmatched",
+            rationale="Router output validation failed.",
+        ).model_dump()
     logger.info("Routed to %s: %s", decision.target_agent, decision.rationale)
     return decision.model_dump()
 

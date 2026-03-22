@@ -65,6 +65,31 @@ def get_today_start_singapore() -> datetime:
     return now.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+def parse_iso_to_utc_datetime(value: str | Any) -> datetime | None:
+    """Parse ISO timestamp string to timezone-aware UTC datetime.
+
+    Handles both 'Z' and '+00:00' suffixes. Returns None if parsing fails.
+
+    Args:
+        value: ISO format timestamp (str) or datetime-like
+
+    Returns:
+        Timezone-aware datetime in UTC, or None on parse failure
+    """
+    from datetime import timezone as tz
+
+    from app.core.constants import UTC_OFFSET_SUFFIX, UTC_Z_SUFFIX
+
+    try:
+        s = str(value).replace(UTC_Z_SUFFIX, UTC_OFFSET_SUFFIX)
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=tz.utc)
+        return dt
+    except Exception:
+        return None
+
+
 def parse_and_format_timestamp(timestamp: str, format_str: str = "%Y-%m-%d %H:%M") -> str:
     """Parse ISO timestamp and format in Singapore timezone.
     
